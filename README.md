@@ -10,6 +10,14 @@ AgentBase stores tasks, decisions, sources, and handoffs in a local project data
 
 [Graph](docs/screenshots/graph.png) · [Tasks](docs/screenshots/kanban.png)
 
+## What can you ask?
+
+Ask Codex or Claude Code to pick up project work, plan and track changes, review code, find saved decisions, analyze project data, or prepare a handoff.
+
+![Example questions for AgentBase in the Inspector's dark theme](docs/agentbase-question-guide.png)
+
+See [Questions.md](Questions.md) for more prompts.
+
 ## What it does
 
 - Stores sourced knowledge, decisions, tasks, plans, and handoffs in a local project database.

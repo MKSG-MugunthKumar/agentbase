@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="2200" viewBox="0 0 1800 2200">
+  <style>
+    .sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+  <rect width="1800" height="2200" fill="#0b0d0e"/>
+
+  <!-- Inspector-like toolbar -->
+  <rect x="70" y="48" width="1660" height="82" rx="18" fill="#1d1f21" stroke="#303335" stroke-width="2"/>
+  <circle cx="110" cy="89" r="8" fill="#52ccb2"/>
+  <text x="134" y="98" class="sans" font-size="28" font-weight="650" fill="#f1f1f1">AgentBase</text>
+  <path d="M300 69 V109" stroke="#3b3d3f" stroke-width="2"/>
+  <rect x="332" y="63" width="110" height="52" rx="12" fill="#444648"/>
+  <text x="387" y="98" text-anchor="middle" class="sans" font-size="24" font-weight="600" fill="#f2f2f2">Graph</text>
+  <text x="500" y="98" class="sans" font-size="24" fill="#b5b6b7">Tasks</text>
+  <text x="610" y="98" class="sans" font-size="24" fill="#b5b6b7">Skills</text>
+  <path d="M724 69 V109" stroke="#3b3d3f" stroke-width="2"/>
+  <circle cx="765" cy="88" r="12" fill="none" stroke="#9a9c9e" stroke-width="2"/>
+  <path d="M774 97 L783 106" stroke="#9a9c9e" stroke-width="2" stroke-linecap="round"/>
+  <text x="802" y="98" class="sans" font-size="23" fill="#85888a">Prompt guide</text>
+
+  <text x="88" y="250" class="sans" font-size="76" font-weight="650" letter-spacing="-1.5" fill="#f1f1f1">Questions to ask AgentBase</text>
+  <text x="92" y="310" class="sans" font-size="29" fill="#a6a9aa">Use these examples in Codex or Claude Code to put project context to work.</text>
+
+  <!-- Row 1, card 1 -->
+  <rect x="70" y="380" width="800" height="450" rx="18" fill="#1b1d1f" stroke="#303335" stroke-width="2"/>
+  <circle cx="112" cy="431" r="7" fill="#52ccb2"/>
+  <text x="134" y="440" class="sans" font-size="32" font-weight="620" fill="#e8e9e9">Pick up where you left off</text>
+  <text x="112" y="520" class="sans" font-size="28" fill="#d0d2d2">“What was I working on, and what</text>
+  <text x="112" y="559" class="sans" font-size="28" fill="#d0d2d2">should I do next?”</text>
+  <text x="112" y="646" class="sans" font-size="26" fill="#a5a8a9">“What changed since the last checkpoint?”</text>
+  <path d="M112 747 H828" stroke="#343739" stroke-width="2"/>
+  <text x="112" y="793" class="sans" font-size="21" fill="#8b8e90">Tasks · handoffs · recent changes</text>
+
+  <!-- Row 1, card 2 -->
+  <rect x="930" y="380" width="800" height="450" rx="18" fill="#1b1d1f" stroke="#303335" stroke-width="2"/>
+  <circle cx="972" cy="431" r="7" fill="#eea348"/>
+  <text x="994" y="440" class="sans" font-size="32" font-weight="620" fill="#e8e9e9">Plan and track work</text>
+  <text x="972" y="520" class="sans" font-size="28" fill="#d0d2d2">“Turn this request into milestones</text>
+  <text x="972" y="559" class="sans" font-size="28" fill="#d0d2d2">and tasks.”</text>
+  <text x="972" y="646" class="sans" font-size="26" fill="#a5a8a9">“What’s blocking this task?”</text>
+  <path d="M972 747 H1688" stroke="#343739" stroke-width="2"/>
+  <text x="972" y="793" class="sans" font-size="21" fill="#8b8e90">Plans · acceptance criteria · dependencies</text>
+
+  <!-- Row 2, card 1 -->
+  <rect x="70" y="860" width="800" height="450" rx="18" fill="#1b1d1f" stroke="#303335" stroke-width="2"/>
+  <circle cx="112" cy="911" r="7" fill="#f45a7a"/>
+  <text x="134" y="920" class="sans" font-size="32" font-weight="620" fill="#e8e9e9">Review the work</text>
+  <text x="112" y="1000" class="sans" font-size="28" fill="#d0d2d2">“Check these changes against the</text>
+  <text x="112" y="1039" class="sans" font-size="28" fill="#d0d2d2">acceptance criteria.”</text>
+  <text x="112" y="1126" class="sans" font-size="26" fill="#a5a8a9">“Look for bugs or missed edge cases.”</text>
+  <path d="M112 1227 H828" stroke="#343739" stroke-width="2"/>
+  <text x="112" y="1273" class="sans" font-size="21" fill="#8b8e90">Code review · evidence · decisions</text>
+
+  <!-- Row 2, card 2 -->
+  <rect x="930" y="860" width="800" height="450" rx="18" fill="#1b1d1f" stroke="#303335" stroke-width="2"/>
+  <circle cx="972" cy="911" r="7" fill="#a694ff"/>
+  <text x="994" y="920" class="sans" font-size="32" font-weight="620" fill="#e8e9e9">Find project knowledge</text>
+  <text x="972" y="1000" class="sans" font-size="28" fill="#d0d2d2">“What decisions should I know before</text>
+  <text x="972" y="1039" class="sans" font-size="28" fill="#d0d2d2">changing this?”</text>
+  <text x="972" y="1126" class="sans" font-size="26" fill="#a5a8a9">“Find the current approach to [topic].”</text>
+  <path d="M972 1227 H1688" stroke="#343739" stroke-width="2"/>
+  <text x="972" y="1273" class="sans" font-size="21" fill="#8b8e90">Search · decisions · linked sources</text>
+
+  <!-- Row 3, card 1 -->
+  <rect x="70" y="1340" width="800" height="450" rx="18" fill="#1b1d1f" stroke="#303335" stroke-width="2"/>
+  <circle cx="112" cy="1391" r="7" fill="#68b8f7"/>
+  <text x="134" y="1400" class="sans" font-size="32" font-weight="620" fill="#e8e9e9">Explore project data</text>
+  <text x="112" y="1480" class="sans" font-size="28" fill="#d0d2d2">“What does this dataset contain?”</text>
+  <text x="112" y="1567" class="sans" font-size="26" fill="#a5a8a9">“Calculate [metric] by [category] and</text>
+  <text x="112" y="1604" class="sans" font-size="26" fill="#a5a8a9">save the analysis.”</text>
+  <path d="M112 1707 H828" stroke="#343739" stroke-width="2"/>
+  <text x="112" y="1753" class="sans" font-size="21" fill="#8b8e90">Datasets · SQL · saved results</text>
+
+  <!-- Row 3, card 2 -->
+  <rect x="930" y="1340" width="800" height="450" rx="18" fill="#1b1d1f" stroke="#303335" stroke-width="2"/>
+  <circle cx="972" cy="1391" r="7" fill="#999da0"/>
+  <text x="994" y="1400" class="sans" font-size="32" font-weight="620" fill="#e8e9e9">Hand off cleanly</text>
+  <text x="972" y="1480" class="sans" font-size="28" fill="#d0d2d2">“Summarize progress, blockers,</text>
+  <text x="972" y="1519" class="sans" font-size="28" fill="#d0d2d2">and the next action.”</text>
+  <text x="972" y="1606" class="sans" font-size="26" fill="#a5a8a9">“Save a checkpoint for the next session.”</text>
+  <path d="M972 1707 H1688" stroke="#343739" stroke-width="2"/>
+  <text x="972" y="1753" class="sans" font-size="21" fill="#8b8e90">Checkpoints · Codex · Claude Code</text>
+
+  <rect x="70" y="1880" width="1660" height="170" rx="18" fill="#17191a" stroke="#303335" stroke-width="2"/>
+  <circle cx="112" cy="1935" r="7" fill="#52ccb2"/>
+  <text x="134" y="1944" class="sans" font-size="25" font-weight="600" fill="#e8e9e9">Your project context stays local.</text>
+  <text x="112" y="1990" class="sans" font-size="21" fill="#a5a8a9">The agent saves work when asked. Ask it to inspect code for a review; completion is agent-reported.</text>
+  <text x="88" y="2135" class="mono" font-size="18" letter-spacing="1" fill="#73787a">MORE EXAMPLES IN QUESTIONS.MD</text>
+</svg>
