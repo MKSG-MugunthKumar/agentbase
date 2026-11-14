@@ -45,6 +45,7 @@ struct ConnectionReply: Decodable {
     @Published var busy = false
     @Published var error: String?
     @Published var action = ""
+    private var activeRuns = 0
     private(set) var workspaceRoot: String?
     private(set) var storeHome = NSHomeDirectory()+"/.local/share/agentbase"
     func setHome(_ path: String) {
@@ -66,22 +67,25 @@ struct ConnectionReply: Decodable {
         else {error=value.error ?? "Setup could not complete."}
     }
     func startup() {
-        run("status", automatically:true)
+        // Both hosts can be inspected independently. Start their read-only status
+        // checks together so the Connections popover is ready as soon as opened.
+        run("status", host:"codex", allowConcurrent:true)
+        run("status", host:"claude", allowConcurrent:true)
     }
-    func refreshAll() {run("status")}
+    func refreshAll() {startup()}
     func checkAll() {
         if state?.installed == true {run("check")}
         else if claudeState?.installed == true {run("check",host:"claude")}
         else {refreshAll()}
     }
-    func run(_ requested: String, host: String = "codex", automatically: Bool = false) {
+    func run(_ requested: String, host: String = "codex", allowConcurrent: Bool = false) {
         let validActions = host == "claude" ? ["status","install","remove","check"] : ["status","install","enable","disable","check"]
-        guard !busy, validActions.contains(requested) else {return}
+        guard (!busy || allowConcurrent), validActions.contains(requested) else {return}
         guard let resources=Bundle.main.resourceURL,
               let data=try? Data(contentsOf:resources.appendingPathComponent("runtime.json")),
               let config=try? JSONSerialization.jsonObject(with:data) as? [String:String],
               let node=config["node"],let source=config["source"] else {error="Setup configuration missing. Rebuild the inspector.";return}
-        busy=true;error=nil;action=requested
+        activeRuns += 1;busy=true;error=nil;action=requested
         let requestedWorkspace = workspaceRoot
         let requestedHome = storeHome
         let process=Process();let output=Pipe();let errors=Pipe()
@@ -95,28 +99,22 @@ struct ConnectionReply: Decodable {
         if let requestedWorkspace {process.arguments! += ["--workspace",requestedWorkspace]}
         process.environment=environment;process.standardOutput=output;process.standardError=errors
         errors.fileHandleForReading.readabilityHandler={handle in _=handle.availableData}
-        do {try process.run()} catch {busy=false;self.error="Could not start setup: \(error.localizedDescription)";return}
+        do {try process.run()} catch {activeRuns=max(0,activeRuns-1);busy=activeRuns>0;self.error="Could not start setup: \(error.localizedDescription)";return}
         let timeout=Task {try? await Task.sleep(nanoseconds:90_000_000_000);if !Task.isCancelled && process.isRunning {process.terminate()}}
         Task { [weak self] in
             let result=await Task.detached {let bytes=output.fileHandleForReading.readDataToEndOfFile();process.waitUntilExit();return bytes}.value
             timeout.cancel();errors.fileHandleForReading.readabilityHandler=nil
-            guard let self else {return};self.busy=false;self.action=""
-            guard self.workspaceRoot == requestedWorkspace, self.storeHome == requestedHome else {self.run("status");return}
+            guard let self else {return};self.activeRuns=max(0,self.activeRuns-1);self.busy=self.activeRuns>0;self.action=self.busy ? "status" : ""
+            guard self.workspaceRoot == requestedWorkspace, self.storeHome == requestedHome else {self.startup();return}
             do {
                 let reply=try JSONDecoder().decode(ConnectionReply.self,from:result)
                 self.apply(reply,host:host)
                 if reply.ok {
                     if host == "codex" {
-                        if automatically && requested == "status" && reply.codex_available == true && reply.installed != true && reply.install_available == true {self.run("install",automatically:true)}
-                        else if requested == "status" || (requested == "install" && automatically) {self.run("status",host:"claude",automatically:automatically)}
-                        else if (requested == "install" || requested == "enable") && reply.enabled == true {self.run("check",automatically:automatically)}
-                        else if requested == "check" && self.claudeState?.installed == true {self.run("check",host:"claude",automatically:automatically)}
-                        else if self.claudeState == nil {self.run("status",host:"claude",automatically:automatically)}
-                    } else if automatically && requested == "status" && reply.claude_available == true && reply.installed != true && reply.install_available == true {
-                        self.run("install",host:"claude",automatically:true)
-                    } else if requested == "status" || requested == "install" {
-                        if self.state?.installed == true && self.state?.enabled == true && self.state?.checked_at == nil {self.run("check",automatically:automatically)}
-                        else if reply.installed == true {self.run("check",host:"claude")}
+                        if (requested == "install" || requested == "enable") && reply.enabled == true {self.run("check")}
+                        else if requested == "check" && self.claudeState?.installed == true {self.run("check",host:"claude")}
+                    } else if requested == "install" {
+                        self.run("check",host:"claude")
                     }
                 }
             }

@@ -52,6 +52,7 @@ struct Snapshot: Decodable {
     @Published var snapshot: Snapshot?
     @Published var projects: [Project] = []
     @Published var failure: String?
+    @Published var storeNotice: String?
     @Published var paused = false
     @Published var projectID: String?
     @Published var section = "Overview"
@@ -85,8 +86,19 @@ struct Snapshot: Decodable {
         self.preferences = preferences
         let savedView = preferences.string(forKey:"viewMode") ?? "Graph"
         viewMode = ["Graph", "Kanban", "Skills"].contains(savedView) ? savedView : "Graph"
+        let defaultHome = NSHomeDirectory() + "/.local/share/agentbase"
         if let i = args.firstIndex(of: "--home"), args.count > i + 1 { home = args[i + 1] }
-        else { home = environment["AGENTBASE_HOME"] ?? preferences.string(forKey: "store") ?? NSHomeDirectory() + "/.local/share/agentbase" }
+        else if let configuredHome = environment["AGENTBASE_HOME"] { home = configuredHome }
+        else {
+            let savedHome = preferences.string(forKey: "store")
+            let candidate = savedHome ?? defaultHome
+            let defaultDatabase = URL(fileURLWithPath: defaultHome).appendingPathComponent("agentbase.sqlite").path
+            if let savedHome, savedHome != defaultHome, !FileManager.default.fileExists(atPath: savedHome),
+               FileManager.default.fileExists(atPath: defaultDatabase) {
+                home = defaultHome
+                storeNotice = "Saved data folder is missing. Reopened your default AgentBase store."
+            } else { home = candidate }
+        }
         if let i = args.firstIndex(of:"--root"), args.count > i+1 { launchRoot = args[i+1] }
         else {launchRoot = environment["AGENTBASE_ROOT"]}
         projectID = launchRoot == nil ? Self.allProjectsID : nil
@@ -451,6 +463,18 @@ struct InspectorView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity).allowsHitTesting(false)
                 }
             }.preferredColorScheme(.dark).tint(accent)
+                .overlay(alignment:.topTrailing) {
+                    if let notice = model.storeNotice {
+                        HStack(spacing:10) {
+                            Image(systemName:"exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            Text(notice).font(.caption)
+                            Button { model.storeNotice = nil } label: { Image(systemName:"xmark").font(.caption2) }
+                                .buttonStyle(.plain).help("Dismiss message")
+                        }.padding(12).background(.regularMaterial,in:RoundedRectangle(cornerRadius:10))
+                            .overlay(RoundedRectangle(cornerRadius:10).stroke(Color.white.opacity(0.08),lineWidth:1))
+                            .padding(.top,18).padding(.trailing,18)
+                    }
+                }
                 .overlay(alignment:.bottomLeading) {AgentBaseCornerLogo(isWorking:model.hasActiveWork).padding(.leading,18).padding(.bottom,12).allowsHitTesting(false)}
         }.frame(minWidth:880,minHeight:600).ignoresSafeArea()
         .onChange(of:model.selectedID) { _,value in if value==nil {expandedDetails=false;panelDrag = .zero};model.focusChanged() }

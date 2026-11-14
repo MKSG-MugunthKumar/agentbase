@@ -7,7 +7,7 @@ import { projectGraph, projectSearch } from './graph.js';
 import { recommendSkills } from './skills.js';
 
 type EmptyGraph = { nodes: never[]; edges: never[]; omitted_nodes: number; total_nodes: number; unresolved: never[] };
-type OverviewGraph = { nodes: ReturnType<typeof projectGraph>['nodes']; edges: ReturnType<typeof projectGraph>['edges']; total_nodes: number; omitted_nodes: number; unresolved: ReturnType<typeof projectGraph>['unresolved'] };
+type OverviewGraph = { nodes: ReturnType<typeof projectGraph>['nodes']; edges: ReturnType<typeof projectGraph>['edges']; total_nodes: number; omitted_nodes: number; unresolved: ReturnType<typeof projectGraph>['unresolved']; source_truncated?: boolean };
 type DerivedCache = { revision: number; dataVersion?: number; key?: string; graph?: ReturnType<typeof projectGraph> | OverviewGraph | EmptyGraph; graphSearch?: ReturnType<typeof projectSearch> };
 export const ALL_PROJECTS_ID = 'agentbase:all';
 
@@ -49,9 +49,19 @@ export function inspectorSnapshot(home: string, projectId?: string, recordId?: s
           }
         }
       }
+      const taskIDs = records.filter(row => row.kind === 'task').map(task => String(task.id));
+      const dependenciesByTask = new Map<string, any[]>();
+      for (let offset = 0; offset < taskIDs.length; offset += 500) {
+        const batch = taskIDs.slice(offset, offset + 500);
+        const dependencies = db.prepare(`SELECT d.task_id,r.id,json_extract(r.body,'$.title') AS title,json_extract(r.body,'$.status') AS status
+          FROM dependencies d JOIN records r ON r.id=d.depends_on WHERE d.task_id IN (${batch.map(() => '?').join(',')})`).all(...batch);
+        for (const dependency of dependencies) {
+          const key = String(dependency.task_id), values = dependenciesByTask.get(key) ?? [];
+          values.push({ id: String(dependency.id), title: dependency.title, status: dependency.status }); dependenciesByTask.set(key, values);
+        }
+      }
       for (const task of records.filter(row => row.kind === 'task')) {
-        task.dependencies = db!.prepare(`SELECT r.id,json_extract(r.body,'$.title') AS title,json_extract(r.body,'$.status') AS status
-          FROM dependencies d JOIN records r ON r.id=d.depends_on WHERE d.task_id=?`).all(task.id);
+        task.dependencies = dependenciesByTask.get(String(task.id)) ?? [];
         task.lease_active = !!task.body.owner && Date.parse(task.body.lease_expires_at ?? '') > Date.now();
       }
       const events = db.prepare(`SELECT e.*, COALESCE(json_extract(r.body,'$.title'),json_extract(r.body,'$.name'),json_extract(r.body,'$.summary'),r.kind) AS record_title,
@@ -64,7 +74,7 @@ export function inspectorSnapshot(home: string, projectId?: string, recordId?: s
       if (reuse) graph = cache.graph as OverviewGraph;
       else {
         const nodes: OverviewGraph['nodes'] = [], edges: OverviewGraph['edges'] = [], unresolved: OverviewGraph['unresolved'] = [];
-        let totalNodes = 0;
+        let totalNodes = 0, sourceTruncated = false;
         const projectBudget = Math.max(1, Math.floor(350 / Math.max(1, projects.length)));
         for (const project of projects) {
           const projectTasks = records.filter(task => task.kind === 'task' && task.project_id === project.id).slice(0, 8);
@@ -76,8 +86,9 @@ export function inspectorSnapshot(home: string, projectId?: string, recordId?: s
           edges.push(...part.edges);
           unresolved.push(...part.unresolved);
           totalNodes += part.total_nodes;
+          sourceTruncated ||= !!part.source_truncated;
         }
-        graph = {nodes,edges,total_nodes:totalNodes,omitted_nodes:Math.max(0,totalNodes-nodes.length),unresolved};
+        graph = {nodes,edges,total_nodes:totalNodes,omitted_nodes:Math.max(0,totalNodes-nodes.length),unresolved,source_truncated:sourceTruncated};
       }
       const phrase = options.search?.trim().slice(0,200) ?? '';
       let graphSearch: ReturnType<typeof projectSearch> | undefined;
@@ -124,6 +135,7 @@ export function inspectorSnapshot(home: string, projectId?: string, recordId?: s
     const counts: Record<string, number> = {};
     const taskSummary: Record<string, number> = {};
     const records: any[] = [];
+    const dependenciesByTask = new Map<string, any[]>();
     let omitted = 0;
     if (selected) {
       const now = new Date().toISOString();
@@ -163,10 +175,14 @@ export function inspectorSnapshot(home: string, projectId?: string, recordId?: s
         }
       }
       const tasks = new Map(records.filter(r => r.kind === 'task').map(r => [r.id, r]));
+      const dependencies = db.prepare(`SELECT d.task_id,r.id,json_extract(r.body,'$.title') AS title,json_extract(r.body,'$.status') AS status
+        FROM dependencies d JOIN records r ON r.id=d.depends_on JOIN records t ON t.id=d.task_id WHERE t.project_id=?`).all(selected.id!);
+      for (const dependency of dependencies) {
+        const key = String(dependency.task_id), values = dependenciesByTask.get(key) ?? [];
+        values.push({ id: String(dependency.id), title: dependency.title, status: dependency.status }); dependenciesByTask.set(key, values);
+      }
       for (const task of tasks.values()) {
-        const dependencies = db.prepare(`SELECT r.id,json_extract(r.body,'$.title') AS title,json_extract(r.body,'$.status') AS status
-          FROM dependencies d JOIN records r ON r.id=d.depends_on WHERE d.task_id=?`).all(task.id);
-        task.dependencies = dependencies;
+        task.dependencies = dependenciesByTask.get(String(task.id)) ?? [];
         task.lease_active = !!task.body.owner && Date.parse(task.body.lease_expires_at ?? '') > Date.now();
       }
     }
@@ -187,11 +203,7 @@ export function inspectorSnapshot(home: string, projectId?: string, recordId?: s
         'progress',json_extract(body,'$.progress'),'reason',json_extract(body,'$.reason')) AS body
       FROM records WHERE project_id=? AND kind='task'
       ORDER BY CASE WHEN json_extract(body,'$.status') NOT IN ('done','cancelled') THEN 0 ELSE 1 END,updated_at DESC,rowid DESC LIMIT 10000`).all(selected.id!).map(row => ({ ...row, body: JSON.parse(String(row.body)) })) : [];
-    const dependencies = selected ? db.prepare(`SELECT d.task_id,r.id,json_extract(r.body,'$.title') AS title,json_extract(r.body,'$.status') AS status
-      FROM dependencies d JOIN records r ON r.id=d.depends_on JOIN records t ON t.id=d.task_id WHERE t.project_id=?`).all(selected.id!) : [];
-    const byTask = new Map<string, any[]>();
-    for (const dependency of dependencies) { const key = String(dependency.task_id); const values = byTask.get(key) ?? []; values.push(dependency); byTask.set(key, values); }
-    const operations = operationsView(operationalTasks.map(t => ({ ...t, dependencies: byTask.get(String((t as any).id)) ?? [] })) as any, events as any);
+    const operations = operationsView(operationalTasks.map(t => ({ ...t, dependencies: dependenciesByTask.get(String((t as any).id)) ?? [] })) as any, events as any);
     const skillRecommendations = taskSkillRecommendations(db, records.find(record => record.id === recordId));
     db.exec('COMMIT;');
     return { ...base, status: 'connected', projects, selected_project_id: selected?.id, working_root: workingRoot, counts, task_summary: taskSummary, records, events, omitted, related: focused, focused_record_id: recordId, operations, graph, graph_search: graphSearch, operations_tasks_omitted: Math.max(0, (counts.task ?? 0) - operationalTasks.length), skill_recommendations: skillRecommendations };

@@ -1,4 +1,6 @@
 import Foundation
+import SwiftUI
+import AppKit
 
 @main struct InspectorChecks {
     @MainActor static func main() async throws {
@@ -78,6 +80,61 @@ import Foundation
         hierarchyLayout.sync(nodes:hierarchyNodes,edges:hierarchyEdges)
         precondition(abs(hypot(hierarchyLayout.particles["parent"]!.point.x,hierarchyLayout.particles["parent"]!.point.y)-180) < 0.001, "A top-level task starts at the project radius")
         precondition(abs(hypot(hierarchyLayout.particles["child"]!.point.x-hierarchyLayout.particles["parent"]!.point.x,hierarchyLayout.particles["child"]!.point.y-hierarchyLayout.particles["parent"]!.point.y)-100) < 0.001, "A subtask starts near its parent even when it arrives first")
+        // Extra metadata must not change the geometry of a connection.
+        let oneLink = GraphLayout(), multiLink = GraphLayout()
+        let pair = Array(hierarchyNodes.prefix(2))
+        oneLink.sync(nodes:pair,edges:[hierarchyEdges[1]])
+        multiLink.sync(nodes:pair,edges:[hierarchyEdges[1],GraphEdge(source:"parent",target:"child",relation:"related"),GraphEdge(source:"child",target:"parent",relation:"wiki")])
+        for _ in 0..<160 { oneLink.step(); multiLink.step() }
+        for node in pair {
+            let a = oneLink.particles[node.id]!.point, b = multiLink.particles[node.id]!.point
+            precondition(hypot(a.x-b.x,a.y-b.y)<0.001,"Multiple semantic relations use one physical connection")
+        }
+        let continuous = GraphLayout()
+        continuous.sync(nodes:[hierarchyNodes[0]],edges:[])
+        // Run longer than the former ~280-frame cooling window, then disturb the
+        // state directly: no drag, settings change or reheating call may be needed.
+        for _ in 0..<900 { continuous.step() }
+        precondition(continuous.isSettled,"Damping lets an isolated node settle naturally")
+        continuous.particles["child"] = GraphParticle(point:CGPoint(x:500,y:300))
+        continuous.step()
+        precondition(continuous.particles["child"]!.point.x < 500 && !continuous.isSettled,"Forces remain active after the old cooling timeout")
+        for _ in 0..<900 { continuous.step() }
+        continuous.gravityEnabled = false
+        continuous.particles["child"] = GraphParticle(point:CGPoint(x:20,y:20),velocity:CGPoint(x:2,y:0))
+        continuous.step()
+        precondition(continuous.particles["child"]!.point.x > 20,"Existing momentum still integrates after prolonged runtime")
+        // Exercise the real run-loop clock across a drag lasting >5 seconds,
+        // repeatedly refreshing graph data as the live inspector does.
+        let clocked = GraphLayout()
+        clocked.sync(nodes:hierarchyNodes,edges:hierarchyEdges)
+        clocked.drag("parent",to:CGPoint(x:300,y:200))
+        clocked.setSimulationRunning(true)
+        defer { clocked.setSimulationRunning(false) }
+        for refresh in 0..<7 {
+            try await Task.sleep(nanoseconds:1_000_000_000)
+            let previousTick = clocked.clockTickCount
+            let target = CGPoint(x:300+Double(refresh)*30,y:200)
+            clocked.drag("parent",to:target)
+            clocked.sync(nodes:hierarchyNodes,edges:hierarchyEdges)
+            clocked.setSimulationRunning(true)
+            try await Task.sleep(nanoseconds:100_000_000)
+            precondition(clocked.clockTickCount > previousTick,"Animation clock survives live refresh throughout a long drag")
+            precondition(clocked.particles["parent"]!.point == target,"Long drag remains pinned to the pointer")
+        }
+        precondition(clocked.clockTickCount > 100,"Real animation ticks continue beyond five seconds")
+        clocked.release()
+        let releasedPoint = clocked.particles["parent"]!.point
+        try await Task.sleep(nanoseconds:200_000_000)
+        precondition(clocked.particles["parent"]!.point != releasedPoint,"Real clock continues physics after long-drag release")
+        clocked.setSimulationRunning(false)
+        let pausedTicks = clocked.clockTickCount
+        try await Task.sleep(nanoseconds:150_000_000)
+        precondition(clocked.clockTickCount == pausedTicks && !clocked.clockIsRunning,"Pause cancels the persistent clock")
+        clocked.setSimulationRunning(true)
+        try await Task.sleep(nanoseconds:150_000_000)
+        precondition(clocked.clockTickCount > pausedTicks,"Resume restarts the persistent clock")
+        clocked.setSimulationRunning(false)
         let savedCamera = GraphCameraState(scale:1.35,offset:CGPoint(x:-220,y:95))
         let restoredCamera = GraphCameraState(stored:savedCamera.stored)
         precondition(restoredCamera?.scale == savedCamera.scale && restoredCamera?.offset == savedCamera.offset, "Camera zoom and world center survive persistence")
@@ -146,7 +203,7 @@ import Foundation
         precondition(workspace.projectColors(nodes:renamedProjects)["agentbase2"] == projectColors["agentbase2"], "Renaming a project does not change its color")
         let retained = layout.particles["n0"]!.point; layout.sync(nodes: graphNodes, edges: graphEdges)
         precondition(layout.particles["n0"]!.point == retained, "Live updates preserve graph positions")
-        layout.sync(nodes: [graphNodes[0]], edges: []); layout.pinned = nil; layout.gravity = 0.7; layout.repulsion = 0; layout.heat = 1
+        layout.sync(nodes: [graphNodes[0]], edges: []); layout.pinned = nil; layout.gravity = 0.7; layout.repulsion = 0
         let before = hypot(layout.particles["n0"]!.point.x,layout.particles["n0"]!.point.y)
         for _ in 0..<100 { layout.step() }
         precondition(hypot(layout.particles["n0"]!.point.x,layout.particles["n0"]!.point.y) < before, "Gravity pulls toward center")
@@ -159,10 +216,10 @@ import Foundation
         precondition(layout.appearance(fresh.id,now:100) == 0)
         precondition(abs(layout.appearance(fresh.id,now:100.4)-0.5) < 0.001)
         precondition(layout.appearance(fresh.id,now:101) == 1)
-        layout.heat = 0; let freshPoint = layout.particles[fresh.id]!.point
+        let freshPoint = layout.particles[fresh.id]!.point
         layout.sync(nodes:[fresh,graphNodes[0]],edges:[freshEdge],now:100.2)
         precondition(layout.births[fresh.id] == 100, "Refresh must not restart birth animation")
-        precondition(layout.particles[fresh.id]!.point == freshPoint && layout.heat == 0, "Record ordering alone does not move or reheat the graph")
+        precondition(layout.particles[fresh.id]!.point == freshPoint, "Record ordering alone does not move the graph")
         model.paused = false; model.accept(try snapshot()); model.selectedID = "task_a"
         precondition(model.hasActiveWork, "Live updates restore the working indicator")
         precondition(model.kanbanTasks.count == 3)
@@ -332,7 +389,47 @@ import Foundation
         precondition(placed==CGPoint(x:628,y:34))
         let resized=DetailPanelPlacement.clamped(CGPoint(x:800,y:700),size:CGSize(width:560,height:500),container:CGSize(width:880,height:600))
         precondition(resized==CGPoint(x:308,y:82),"Resizing keeps the panel header reachable")
+        if let directory = ProcessInfo.processInfo.environment["AGENTBASE_GRAPH_PREVIEW_DIR"] {
+            try renderGraphFixtures(to:directory)
+        }
         model.stop()
         print("Native model and graph physics checks passed: task filters, navigation, project pinning, remembered store, retained snapshots, reconnect scheduling and pause cancellation.")
+    }
+
+    @MainActor static func renderGraphFixtures(to directory:String) throws {
+        try FileManager.default.createDirectory(atPath:directory,withIntermediateDirectories:true)
+        let topics = ["Project memory","Data analysis","Native inspector","Task planning","Source evidence"]
+        let titles = ["Architecture","Design decisions","Import pipeline","Validation","Research notes","Saved results","Relationships","Version history","Search","Local workspace","Review findings","Next steps"]
+        var nodes:[GraphNode] = [], edges:[GraphEdge] = []
+        for group in topics.indices {
+            let root = "topic-\(group)"
+            nodes.append(GraphNode(id:root,kind:"concept",title:topics[group],summary:"",status:"",uri:nil,degree:titles.count+2))
+            for index in titles.indices {
+                let id = "\(group)-\(index)"
+                nodes.append(GraphNode(id:id,kind:index % 3 == 0 ? "task" : "memory",title:titles[index],summary:"",status:"",uri:nil,degree:index % 4 == 0 ? 2 : 1))
+                edges.append(GraphEdge(source:root,target:id,relation:"related"))
+                if index % 4 == 0 { edges.append(GraphEdge(source:id,target:"\(group)-\(index+1)",relation:"wiki")) }
+            }
+            if group > 0 { edges.append(GraphEdge(source:root,target:"topic-\(group-1)",relation:"related")) }
+        }
+        let physics = GraphLayout(); physics.sync(nodes:nodes,edges:edges)
+        for _ in 0..<280 { physics.step() }
+        let points = physics.particles.values.map(\.point)
+        let minX = points.map(\.x).min()!, maxX = points.map(\.x).max()!
+        let minY = points.map(\.y).min()!, maxY = points.map(\.y).max()!
+        let scale = min(1.4,min(1020/max(1,maxX-minX),650/max(1,maxY-minY)))
+        let offset = CGPoint(x:-(minX+maxX)/2*scale,y:-(minY+maxY)/2*scale)
+        for (name,selected) in [("overview",nil),("focused",Optional("topic-2"))] {
+            let drawing = GraphDrawing(nodes:nodes,edges:edges,particles:physics.particles,scale:scale,offset:offset,selected:selected)
+            let view = Canvas { context,size in drawing.draw(context:context,size:size) }
+                .frame(width:1200,height:800).background(Color(white:0.118))
+            let renderer = ImageRenderer(content:view); renderer.scale = 2
+            guard let cg = renderer.cgImage,
+                  let data = NSBitmapImageRep(cgImage:cg).representation(using:.png,properties:[:]) else {
+                preconditionFailure("Graph fixture failed to render")
+            }
+            try data.write(to:URL(fileURLWithPath:directory).appendingPathComponent("\(name).png"))
+        }
+        print("Graph visual fixtures: \(directory)")
     }
 }

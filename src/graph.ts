@@ -4,6 +4,30 @@ import type { RecordData } from './store.js';
 export interface GraphNode { id: string; kind: string; title: string; summary: string; status: string; uri?: string; degree: number; }
 export interface GraphEdge { source: string; target: string; relation: string; }
 export interface GraphOptions { query?: string; focus_id?: string; include_id?: string; priority_ids?: string[]; view?: 'all' | 'content'; depth?: number; limit?: number; workingRoot?: string; }
+const graphRecordSelect = `SELECT id,project_id,kind,version,created_at,updated_at,
+  json_extract(body,'$.status') AS status,json_extract(body,'$.graph_role') AS graph_role,
+  json_extract(body,'$.node_type') AS node_type,json_extract(body,'$.title') AS title,
+  json_extract(body,'$.name') AS name,json_extract(body,'$.goal') AS goal,
+  json_extract(body,'$.summary') AS summary,json_extract(body,'$.actor') AS actor,
+  json_extract(body,'$.content') AS content,json_extract(body,'$.description') AS description,
+  json_extract(body,'$.uri') AS uri,json_extract(body,'$.source') AS source,
+  json_extract(body,'$.parent_id') AS parent_id,json_extract(body,'$.parent_task_id') AS parent_task_id,
+  json_extract(body,'$.task_id') AS task_id,json_extract(body,'$.plan_id') AS plan_id,
+  json_extract(body,'$.session_id') AS session_id,json_extract(body,'$.previous_version_id') AS previous_version_id,
+  json_extract(body,'$.supersedes') AS supersedes,json_extract(body,'$.sources') AS sources,
+  json_extract(body,'$.graph_links') AS graph_links,json_extract(body,'$.related_ids') AS related_ids,
+  json_extract(body,'$.datasets') AS datasets,json_extract(body,'$.completion') AS completion,
+  json_extract(body,'$.evidence') AS evidence`;
+const graphArrayFields = new Set(['sources','graph_links','related_ids','datasets','completion','evidence']);
+function decodeGraphRow(row: any): RecordData {
+  const body: Record<string, any> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (['id','project_id','kind','version','created_at','updated_at'].includes(key) || value == null) continue;
+    body[key] = graphArrayFields.has(key) && typeof value === 'string' ? JSON.parse(value) : value;
+  }
+  return { id: String(row.id), project_id: String(row.project_id), kind: String(row.kind), version: Number(row.version),
+    created_at: String(row.created_at), updated_at: String(row.updated_at), body };
+}
 // One folder edge per visible connected component, preferring information over its evidence.
 function projectRepresentatives(nodes: Map<string,GraphNode>, edges: GraphEdge[]): string[] {
     const semantic = new Map<string, Set<string>>();
@@ -25,12 +49,12 @@ function projectRepresentatives(nodes: Map<string,GraphNode>, edges: GraphEdge[]
 }
 export function projectGraph(db: DatabaseSync, projectId: string, options: GraphOptions = {}) {
   const limit = options.limit ?? 350, depth = options.depth ?? 1;
-  const rows = db.prepare("SELECT * FROM records WHERE project_id=? AND COALESCE(json_extract(body,'$.status'),'')!='forgotten' ORDER BY updated_at DESC,rowid DESC LIMIT 10000").all(projectId);
-  let records = rows.map(row => ({ ...row, body: JSON.parse(String(row.body)) })) as unknown as RecordData[];
+  const rows = db.prepare(`${graphRecordSelect} FROM records WHERE project_id=? AND COALESCE(json_extract(body,'$.status'),'')!='forgotten' ORDER BY updated_at DESC,rowid DESC LIMIT 10000`).all(projectId);
+  let records = rows.map(decodeGraphRow);
   const wanted = options.focus_id ?? options.include_id;
   if (wanted && !records.some(r => r.id === wanted)) {
-    const row = db.prepare("SELECT * FROM records WHERE project_id=? AND id=? AND COALESCE(json_extract(body,'$.status'),'')!='forgotten'").get(projectId,wanted);
-    if (row) { if (records.length === 10000) records.pop(); records.unshift({ ...row, body: JSON.parse(String(row.body)) } as unknown as RecordData); }
+    const row = db.prepare(`${graphRecordSelect} FROM records WHERE project_id=? AND id=? AND COALESCE(json_extract(body,'$.status'),'')!='forgotten'`).get(projectId,wanted);
+    if (row) { if (records.length === 10000) records.pop(); records.unshift(decodeGraphRow(row)); }
   }
   const neighborIDs = new Set<string>();
   if (wanted && wanted !== projectId) {
@@ -53,8 +77,8 @@ export function projectGraph(db: DatabaseSync, projectId: string, options: Graph
     }
     const present=new Set(records.map(r=>r.id));
     for(const id of [...neighborIDs].slice(0,100)) if(!present.has(id)) {
-      const row=db.prepare("SELECT * FROM records WHERE project_id=? AND id=? AND COALESCE(json_extract(body,'$.status'),'')!='forgotten'").get(projectId,id);
-      if(row) records.push({...row,body:JSON.parse(String(row.body))} as unknown as RecordData);
+      const row=db.prepare(`${graphRecordSelect} FROM records WHERE project_id=? AND id=? AND COALESCE(json_extract(body,'$.status'),'')!='forgotten'`).get(projectId,id);
+      if(row) records.push(decodeGraphRow(row));
     }
   }
   if (options.view === 'content') {

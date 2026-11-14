@@ -129,9 +129,14 @@ export class Agentbase {
   }
   async open(input: Inputs['project_open']) {
     const { root, repository_key } = await repositoryIdentity(input.root);
-    // Discover old projects lazily: migration never needs to execute Git or access deleted paths.
+    // Discover old projects lazily only when neither indexed identity can resolve this open.
+    // Known projects should not pay for Git probes across every legacy root on each call.
     const legacyMatches: string[] = [];
-    if (repository_key) {
+    const knownByRoot = this.store.db.prepare('SELECT 1 FROM project_roots WHERE root=?').get(root);
+    const knownByRepository = repository_key
+      ? this.store.db.prepare('SELECT 1 FROM projects WHERE repository_key=?').get(repository_key)
+      : undefined;
+    if (repository_key && !knownByRoot && !knownByRepository) {
       for (const row of this.store.db.prepare('SELECT id,root FROM projects WHERE repository_key IS NULL').all()) {
         try { if ((await repositoryIdentity(row.root as string)).repository_key === repository_key) legacyMatches.push(row.id as string); } catch {}
       }
@@ -155,10 +160,29 @@ export class Agentbase {
   }
   private projects(p: Inputs['project_list']) {
     const query = (p.query ?? '').toLowerCase();
-    const projects = this.store.projects()
-      .map(row => ({ ...row, roots: this.store.roots(row.id) }))
-      .filter(row => !query || JSON.stringify([row.id, row.name, row.goal, ...row.roots]).toLowerCase().includes(query));
-    return { projects: projects.slice(p.offset, p.offset + p.limit), total: projects.length, offset: p.offset, limit: p.limit };
+    const rows = query ? this.store.projects() : this.store.db.prepare(
+      'SELECT * FROM projects ORDER BY created_at DESC,id LIMIT ? OFFSET ?',
+    ).all(p.limit, p.offset) as any[];
+    const rootsByProject = new Map<string, string[]>();
+    for (let offset = 0; offset < rows.length; offset += 500) {
+      const batch = rows.slice(offset, offset + 500);
+      const roots = this.store.db.prepare(`SELECT project_id,root FROM project_roots
+        WHERE project_id IN (${batch.map(() => '?').join(',')}) ORDER BY project_id,created_at,root`).all(...batch.map(row => row.id));
+      for (const row of roots) {
+        const values = rootsByProject.get(String(row.project_id)) ?? [];
+        values.push(String(row.root)); rootsByProject.set(String(row.project_id), values);
+      }
+    }
+    let projects = rows.map(row => ({ ...row, roots: rootsByProject.get(String(row.id)) ?? [] }));
+    let total: number;
+    if (query) {
+      projects = projects.filter(row => JSON.stringify([row.id, row.name, row.goal, ...row.roots]).toLowerCase().includes(query));
+      total = projects.length;
+      projects = projects.slice(p.offset, p.offset + p.limit);
+    } else {
+      total = Number(this.store.db.prepare('SELECT COUNT(*) AS count FROM projects').get()?.count ?? 0);
+    }
+    return { projects, total, offset: p.offset, limit: p.limit };
   }
   private async rootFor(projectId: string, requested?: string): Promise<string> {
     const roots = this.store.roots(projectId);
@@ -272,6 +296,43 @@ export class Agentbase {
       parent_task: parent ? { id: parent.id, title: parent.body.title, status: parent.body.status } : null,
       child_tasks: children.map(child => ({ id: String(child.id), title: String(child.title), status: String(child.status) })),
       lease_active, reclaimable: ['in_progress', 'review'].includes(task.body.status) && !lease_active && blocking.length === 0 };
+  }
+  private taskDetailsBatch(tasks: RecordData[]) {
+    if (!tasks.length) return [];
+    const ids = tasks.map(task => task.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const dependenciesByTask = new Map<string, RecordData[]>();
+    for (const row of this.store.db.prepare(`SELECT d.task_id,r.* FROM dependencies d JOIN records r ON r.id=d.depends_on
+      WHERE d.task_id IN (${placeholders}) AND r.project_id=? ORDER BY d.task_id,d.depends_on`).all(...ids,tasks[0]!.project_id)) {
+      const dependency = this.store.decode(row);
+      const values = dependenciesByTask.get(String(row.task_id)) ?? [];
+      values.push(dependency); dependenciesByTask.set(String(row.task_id), values);
+    }
+    const parentIds = [...new Set(tasks.map(task => task.body.parent_task_id).filter((id): id is string => typeof id === 'string'))];
+    const parents = new Map<string, RecordData>();
+    if (parentIds.length) {
+      const parentRows = this.store.db.prepare(`SELECT * FROM records WHERE project_id=? AND id IN (${parentIds.map(() => '?').join(',')})`).all(tasks[0]!.project_id,...parentIds);
+      for (const row of parentRows) { const parent = this.store.decode(row); parents.set(parent.id,parent); }
+    }
+    const childrenByParent = new Map<string, { id: string; title: string; status: string }[]>();
+    for (const row of this.store.db.prepare(`SELECT id,json_extract(body,'$.parent_task_id') AS parent_id,
+      json_extract(body,'$.title') AS title,json_extract(body,'$.status') AS status FROM records
+      WHERE project_id=? AND kind='task' AND json_extract(body,'$.parent_task_id') IN (${placeholders})
+      ORDER BY created_at,id`).all(tasks[0]!.project_id,...ids)) {
+      const key = String(row.parent_id), values = childrenByParent.get(key) ?? [];
+      values.push({ id: String(row.id), title: String(row.title), status: String(row.status) }); childrenByParent.set(key,values);
+    }
+    return tasks.map(task => {
+      const dependencies = dependenciesByTask.get(task.id) ?? [];
+      const blocking = dependencies.filter(dependency => dependency.body.status !== 'done');
+      const parent = task.body.parent_task_id ? parents.get(task.body.parent_task_id) : null;
+      const lease_active = Boolean(this.leaseActive(task));
+      return { ...task, dependencies: dependencies.map(dependency => dependency.id), blockers: blocking.map(dependency => dependency.id),
+        blocking_tasks: blocking.map(dependency => ({ id: dependency.id, title: dependency.body.title, status: dependency.body.status })),
+        parent_task: parent ? { id: parent.id, title: parent.body.title, status: parent.body.status } : null,
+        child_tasks: childrenByParent.get(task.id) ?? [], lease_active,
+        reclaimable: ['in_progress','review'].includes(task.body.status) && !lease_active && blocking.length === 0 };
+    });
   }
   private validateTaskParent(projectId: string, parentId: string | null | undefined, childStatus: string, taskId?: string) {
     const seen = new Set(taskId ? [taskId] : []);
@@ -472,7 +533,7 @@ export class Agentbase {
     const rows = this.store.db.prepare(`SELECT r.* FROM records r WHERE ${where}
       ORDER BY COALESCE(CAST(json_extract(r.body,'$.priority') AS INTEGER),2),r.created_at,r.updated_at DESC,r.rowid DESC
       LIMIT ? OFFSET ?`).all(...args,p.limit,p.offset);
-    return { records: rows.map(row => this.taskDetails(this.store.decode(row))), total, limit: p.limit, offset: p.offset };
+    return { records: this.taskDetailsBatch(rows.map(row => this.store.decode(row))), total, limit: p.limit, offset: p.offset };
   }
   private openTaskCandidates(projectId: string, query?: string) {
     const where = "r.project_id=? AND r.kind='task' AND json_extract(r.body,'$.status') IN ('proposed','ready','in_progress','review','blocked')";

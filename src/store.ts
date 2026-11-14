@@ -63,6 +63,8 @@ export class Store {
         id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), kind TEXT NOT NULL,
         version INTEGER NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS records_project ON records(project_id, kind, updated_at);
+      CREATE INDEX IF NOT EXISTS records_task_parent_status
+        ON records(project_id, json_extract(body,'$.parent_task_id'), json_extract(body,'$.status')) WHERE kind='task';
       CREATE TABLE IF NOT EXISTS dependencies (
         task_id TEXT NOT NULL REFERENCES records(id), depends_on TEXT NOT NULL REFERENCES records(id),
         PRIMARY KEY(task_id, depends_on), CHECK(task_id != depends_on));
@@ -176,6 +178,9 @@ export class Store {
     const terms = words.map(word => `"${word.replaceAll('"', '""')}"`);
     const match = terms.join(' OR ');
     const complete = terms.join(' AND ');
+    const phrase = query.trim().toLocaleLowerCase();
+    const title = `lower(COALESCE(json_extract(r.body,'$.title'),json_extract(r.body,'$.name'),json_extract(r.body,'$.goal'),json_extract(r.body,'$.summary'),json_extract(r.body,'$.actor'),''))`;
+    const titleCoverage = words.map(() => `CASE WHEN instr(${title},lower(?))>0 THEN 1 ELSE 0 END`).join(' + ');
     return this.db.prepare(`SELECT r.* FROM search_index s JOIN records r ON r.id=s.id
       WHERE search_index MATCH ? AND r.project_id=? AND (? IS NULL OR r.kind=?)
         AND COALESCE(json_extract(r.body,'$.status'),'') NOT IN ('forgotten','rejected')
@@ -183,7 +188,9 @@ export class Store {
           CASE COALESCE(json_extract(r.body,'$.status'),'active') WHEN 'active' THEN 0 WHEN 'disputed' THEN 1 WHEN 'stale' THEN 2 ELSE 3 END
         ELSE 0 END,
         CASE WHEN r.id IN (SELECT id FROM search_index WHERE search_index MATCH ? AND project_id=?) THEN 0 ELSE 1 END,
+        CASE WHEN instr(${title},?)>0 THEN 0 ELSE 1 END,
+        (${titleCoverage}) DESC,
         rank, r.updated_at DESC, r.id LIMIT ? OFFSET ?`)
-      .all(match, projectId, kind ?? null, kind ?? null, complete, projectId, limit, offset).map(row => this.decode(row));
+      .all(match, projectId, kind ?? null, kind ?? null, complete, projectId, phrase, ...words, limit, offset).map(row => this.decode(row));
   }
 }
