@@ -1,5 +1,12 @@
 import SwiftUI
 import AppKit
+import Security
+import SQLite3
+
+private var isStoreSandboxed: Bool {
+    guard let task = SecTaskCreateFromSelf(nil) else { return false }
+    return (SecTaskCopyValueForEntitlement(task, "com.apple.security.app-sandbox" as CFString, nil) as? Bool) == true
+}
 
 func bundledPath(_ path: String) -> String {
     path.hasPrefix("/") ? path : (Bundle.main.resourceURL?.appendingPathComponent(path).path ?? path)
@@ -93,7 +100,10 @@ struct Snapshot: Decodable {
             let savedHome = preferences.string(forKey: "store")
             let candidate = savedHome ?? defaultHome
             let defaultDatabase = URL(fileURLWithPath: defaultHome).appendingPathComponent("agentbase.sqlite").path
-            if let savedHome, savedHome != defaultHome, !FileManager.default.fileExists(atPath: savedHome),
+            if isStoreSandboxed, savedHome != nil, savedHome != defaultHome {
+                home = defaultHome
+                storeNotice = "Choose a store folder to import a read-only snapshot into this App Store app."
+            } else if let savedHome, savedHome != defaultHome, !FileManager.default.fileExists(atPath: savedHome),
                FileManager.default.fileExists(atPath: defaultDatabase) {
                 home = defaultHome
                 storeNotice = "Saved data folder is missing. Reopened your default AgentBase store."
@@ -263,8 +273,46 @@ struct Snapshot: Decodable {
     func chooseSearchResult(_ node: GraphNode) {graphSearchTask?.cancel();graphQuery = "";graphFocusPreservesZoom = true;graphFocusID = node.id;graphFocusRequest = UUID();openRecord(node.id,kind:node.kind)}
     func focusChanged() { if !paused { start() } }
     func chooseStore() {
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.prompt = "Inspect store"
-        if panel.runModal() == .OK, let url = panel.url { launchRoot = nil; resetNavigation(); home = url.path; connections.setHome(home); projectID = preferences.dictionary(forKey: "projects")?[home] as? String; connections.setWorkspace(nil); selectedID = nil; snapshot = nil; projects = []; start() }
+        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
+        panel.prompt = isStoreSandboxed ? "Import store" : "Inspect store"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if isStoreSandboxed {
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            let destination = NSHomeDirectory() + "/.local/share/agentbase"
+            let source = url.appendingPathComponent("agentbase.sqlite").path
+            guard FileManager.default.fileExists(atPath: source) else {
+                storeNotice = "That folder has no agentbase.sqlite database. Choose your AgentBase store folder."
+                return
+            }
+            stop()
+            do {
+                try FileManager.default.createDirectory(atPath: destination, withIntermediateDirectories: true)
+                var input: OpaquePointer?; var output: OpaquePointer?
+                guard sqlite3_open_v2(source, &input, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+                    sqlite3_close(input); throw NSError(domain: "AgentBase", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not read the selected store."])
+                }
+                defer { sqlite3_close(input) }
+                guard sqlite3_open_v2(destination + "/agentbase.sqlite", &output, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK else {
+                    sqlite3_close(output); throw NSError(domain: "AgentBase", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not create the imported store."])
+                }
+                defer { sqlite3_close(output) }
+                guard let backup = sqlite3_backup_init(output, "main", input, "main") else {
+                    throw NSError(domain: "AgentBase", code: 3, userInfo: [NSLocalizedDescriptionKey: "Could not start the store import."])
+                }
+                let result = sqlite3_backup_step(backup, -1)
+                let finished = sqlite3_backup_finish(backup)
+                guard result == SQLITE_DONE, finished == SQLITE_OK else {
+                    throw NSError(domain: "AgentBase", code: 4, userInfo: [NSLocalizedDescriptionKey: "The store import did not finish."])
+                }
+                home = destination
+                storeNotice = "Imported a read-only snapshot. Import again to refresh it."
+            } catch {
+                storeNotice = error.localizedDescription
+                start(); return
+            }
+        } else { home = url.path }
+        launchRoot = nil; resetNavigation(); connections.setHome(home); projectID = preferences.dictionary(forKey: "projects")?[home] as? String; connections.setWorkspace(nil); selectedID = nil; snapshot = nil; projects = []; start()
     }
     func matchesTask(_ entry: Entry) -> Bool {
         let status = entry.text("status")

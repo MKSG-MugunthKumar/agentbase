@@ -44,6 +44,7 @@
     "ui:build": "node scripts/native-ui.mjs",
     "ui": "node scripts/native-ui.mjs --open",
     "release:mac": "node scripts/release-mac.mjs",
+    "release:mac:store": "node scripts/release-mac-store.mjs",
     "test:ui": "node scripts/test-native-ui.mjs",
     "test:graph": "node scripts/test-graph.mjs"
   },

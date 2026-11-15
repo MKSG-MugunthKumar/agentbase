@@ -40,6 +40,8 @@ await writeFile(join(contents, 'Info.plist'), `<?xml version="1.0" encoding="UTF
 <key>CFBundleShortVersionString</key><string>${version}</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+<key>NSHumanReadableCopyright</key><string>Copyright © 2026 Sean Preusse</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>\n`);
   execFileSync('xcrun', ['swiftc', '-parse-as-library', '-swift-version', '5', '-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macosx14.0`, '-O', '-framework', 'SwiftUI', '-framework', 'AppKit', '-framework', 'Security', join(root, 'native/AgentbaseInspector/AgentbaseInspector.swift'), join(root, 'native/AgentbaseInspector/GraphCanvas.swift'), join(root, 'native/AgentbaseInspector/KanbanWorkspace.swift'), join(root, 'native/AgentbaseInspector/MemoryWorkspace.swift'), join(root, 'native/AgentbaseInspector/SkillWorkspace.swift'), join(root, 'native/AgentbaseInspector/ConnectionsWorkspace.swift'), join(root, 'native/AgentbaseInspector/BringYourOwnAI.swift'), join(root, 'native/AgentbaseInspector/AnalysisWorkspace.swift'), '-o', join(contents, 'MacOS/AgentbaseInspector')], { cwd: root, stdio: 'inherit' });
