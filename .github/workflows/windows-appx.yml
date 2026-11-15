@@ -1,0 +1,26 @@
+name: Windows Store package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows-desktop]
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install AgentBase dependencies
+        run: npm ci
+      - name: Install desktop dependencies
+        run: npm ci --prefix desktop
+      - name: Build Windows Store package
+        run: npm run build:windows --prefix desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentbase-windows-appx
+          path: build/windows/*.appx
+          if-no-files-found: error

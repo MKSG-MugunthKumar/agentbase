@@ -5,4 +5,5 @@ dist/
 .DS_Store
 coverage/
 build/
+desktop/build-resources/
 test-results/

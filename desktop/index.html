@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'">
+  <title>AgentBase</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="renderer.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <header class="brand"><img src="assets/logo.png" alt=""><div><strong>AgentBase</strong><small>Project inspector</small></div></header>
+    <label class="field-label" for="project">PROJECT</label>
+    <select id="project"></select>
+    <nav aria-label="Views">
+      <button class="nav active" data-view="graph">Graph</button>
+      <button class="nav" data-view="tasks">Tasks</button>
+      <button class="nav" data-view="records">Records</button>
+    </nav>
+    <div class="sidebar-bottom">
+      <span id="store-path"></span>
+      <button id="choose-store">Choose data folder…</button>
+    </div>
+  </aside>
+  <main>
+    <header class="toolbar">
+      <div><h1 id="title">Graph</h1><p id="subtitle">Project knowledge and relationships</p></div>
+      <div class="toolbar-actions"><input id="search" type="search" placeholder="Search project" aria-label="Search project"><button id="refresh">Refresh</button></div>
+    </header>
+    <div id="notice" role="status"></div>
+    <div class="workspace"><section id="content" aria-live="polite"></section><aside id="detail" aria-label="Selected item"><div class="empty-detail">Select an item to inspect it.</div></aside></div>
+  </main>
+</body>
+</html>
