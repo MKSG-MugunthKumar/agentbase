@@ -20,7 +20,7 @@ jobs:
       - name: Check shared desktop behavior
         run: |
           npm run build
-          node --test test/desktop-skill.test.mjs test/desktop-view-model.test.mjs test/desktop-connection-actions.test.mjs test/desktop-memory-actions.test.mjs
+          node --test test/desktop-skill.test.mjs test/desktop-view-model.test.mjs test/desktop-connection-actions.test.mjs test/desktop-memory-actions.test.mjs test/desktop-analysis-view.test.mjs
       - name: Build Windows bundles
         run: npm run build:windows --prefix desktop
       - name: Capture Windows Store screenshot

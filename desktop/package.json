@@ -18,6 +18,7 @@
       "main.mjs",
       "connection-actions.mjs",
       "memory-actions.mjs",
+      "analysis-view.mjs",
       "preload.cjs",
       "index.html",
       "renderer.js",

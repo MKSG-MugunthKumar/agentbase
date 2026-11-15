@@ -1,4 +1,5 @@
 import { taskGroup, taskSummary, visibleGraph, memoryComparisons } from './view-model.mjs';
+import { analysisData, analysisDefaultAxes, analysisPoints } from './analysis-view.mjs';
 
 const $ = id => document.getElementById(id);
 const state = { view: 'graph', project: 'agentbase:all', record: '', recordHistory: [], historyIndex: -1, detailExpanded: false, skill: '', skillEditing: false, editingSkill: '', newTemplate: null, skillTemplates: [], templateCategory: 'General', taskLimit: 200, search: '', skillSearch: '', skillCategory: 'All', statusFilter: 'All', paused: false, memoryDraft: null, memoryBusy: false, memoryMessage: '', includeBackground: false, hiddenKinds: new Set(['session']), orphans: true, localGraph: false, localDepth: 1, colorMode: 'none', labels: true, arrows: false, nodeSize: 1, linkWidth: 1, centerForce: .12, repelForce: 2200, linkForce: .015, linkDistance: 1, snapshot: null, loading: false, queued: false, panel: '', connectionStatus: null, connectionLoading: false, connectionActionBusy: false, connectionMessage: '', connectionRequest: 0, zoom: 1, panX: 0, panY: 0 };
@@ -522,6 +523,85 @@ function renderTemplatePicker() {
   layout.append(categories, choices); dialog.append(top, layout, el('p', 'template-note', 'Creates a SKILL.md in this project.')); overlay.replaceChildren(dialog);
 }
 
+let analysisSelection = null;
+function renderAnalysisWorkspace(target, record) {
+  const data = analysisData(record);
+  const schema = JSON.stringify(data.columns.map(column => [column.name, column.type]));
+  if (analysisSelection?.id !== record.id || analysisSelection.schema !== schema) analysisSelection = { id: record.id, schema, mode: 'Chart', ...analysisDefaultAxes(data) };
+  const selection = analysisSelection;
+  target.replaceChildren();
+  const modes = el('div', 'analysis-segmented');
+  for (const mode of ['Chart', 'Table']) {
+    const button = el('button', selection.mode === mode ? 'active' : '', mode);
+    button.addEventListener('click', () => { selection.mode = mode; renderAnalysisWorkspace(target, record); }); modes.append(button);
+  }
+  target.append(modes);
+  const points = analysisPoints(data, selection.x, selection.y);
+  if (selection.mode === 'Table') {
+    const scroll = el('div', 'analysis-table-scroll'), table = el('table', 'result-preview');
+    const head = el('tr'); data.columns.forEach(column => head.append(el('th', '', column.name))); table.append(head);
+    for (const row of data.rows) {
+      const line = el('tr'); data.columns.forEach(column => {
+        const value = Array.isArray(row) ? row[column.id] : undefined;
+        line.append(el('td', '', value == null ? 'null' : typeof value === 'object' ? JSON.stringify(value) : value));
+      }); table.append(line);
+    }
+    scroll.append(table); target.append(scroll);
+    if (!data.rows.length) target.append(el('p', 'analysis-note', 'No saved rows.'));
+  } else if (!data.columns.some(column => column.numeric)) {
+    target.append(empty('No numeric columns', 'Use Table to inspect these saved results.'));
+  } else {
+    const axes = el('div', 'analysis-axes');
+    const axis = (label, values, selected, update) => {
+      const wrap = el('label'); wrap.append(el('span', '', label));
+      const select = el('select'); values.forEach(value => { const option = el('option', '', value.name); option.value = value.id; select.append(option); });
+      select.value = String(selected); select.addEventListener('change', () => { update(Number(select.value)); renderAnalysisWorkspace(target, record); });
+      wrap.append(select); axes.append(wrap);
+    };
+    axis('X', [{ id: -1, name: 'Row' }, ...data.columns], selection.x, value => { selection.x = value; if (data.columns[value]?.temporal && selection.style === 'Bar') selection.style = 'Line'; });
+    axis('Y', data.columns.filter(column => column.numeric), selection.y, value => { selection.y = value; });
+    target.append(axes);
+    const styles = el('div', 'analysis-segmented');
+    for (const style of ['Bar', 'Line', 'Scatter']) {
+      const button = el('button', selection.style === style ? 'active' : '', style);
+      button.addEventListener('click', () => { selection.style = style; renderAnalysisWorkspace(target, record); }); styles.append(button);
+    }
+    target.append(styles);
+    const xColumn = data.columns[selection.x], continuous = selection.x < 0 || xColumn?.numeric || xColumn?.temporal;
+    if (!points.length) target.append(el('p', 'analysis-note', 'No plottable rows for these columns.'));
+    else if (selection.style === 'Bar' && new Set(points.map(point => point.label)).size !== points.length) target.append(el('p', 'analysis-note', 'Repeated X values. Choose a distinct column, use Scatter, or group the result in SQL before drawing bars.'));
+    else if (selection.style !== 'Bar' && !continuous) target.append(el('p', 'analysis-note', 'Choose a numeric or date X column for Line or Scatter.'));
+    else {
+      const width = 520, height = state.detailExpanded ? 430 : 260, left = 49, right = 12, top = 14, bottom = 45;
+      const plotWidth = width - left - right, plotHeight = height - top - bottom;
+      const minX = Math.min(...points.map(point => point.x)), maxX = Math.max(...points.map(point => point.x));
+      const values = points.map(point => point.y), minY = Math.min(selection.style === 'Bar' ? 0 : Infinity, ...values), maxY = Math.max(selection.style === 'Bar' ? 0 : -Infinity, ...values);
+      const yLow = minY === maxY ? minY - 1 : minY, yHigh = minY === maxY ? maxY + 1 : maxY;
+      const yPos = value => top + plotHeight * (1 - (value - yLow) / (yHigh - yLow));
+      const xPos = (point, index) => selection.style === 'Bar' ? left + plotWidth * (index + .5) / points.length : left + plotWidth * (point.x - minX) / (maxX - minX || 1);
+      const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': `${selection.style} chart of ${data.columns[selection.y]?.name || 'Value'} by ${xColumn?.name || 'Row'}, ${points.length} saved rows` });
+      for (let i = 0; i <= 4; i++) {
+        const value = yLow + (yHigh - yLow) * i / 4, y = yPos(value);
+        svg.append(svgEl('line', { x1: left, y1: y, x2: width - right, y2: y, class: 'analysis-grid' }));
+        const label = svgEl('text', { x: left - 7, y: y + 4, 'text-anchor': 'end', class: 'analysis-axis-label' }); label.textContent = Number(value.toPrecision(3)).toString(); svg.append(label);
+      }
+      const ordered = selection.style === 'Bar' ? points : [...points].sort((a, b) => a.x - b.x);
+      if (selection.style === 'Line') svg.append(svgEl('polyline', { points: ordered.map((point, index) => `${xPos(point, index)},${yPos(point.y)}`).join(' '), class: 'analysis-line' }));
+      ordered.forEach((point, index) => {
+        const x = xPos(point, index), y = yPos(point.y);
+        const mark = selection.style === 'Bar' ? svgEl('rect', { x: x - Math.max(1, Math.min(15, plotWidth / points.length * .35)), y: Math.min(y, yPos(0)), width: Math.max(2, Math.min(30, plotWidth / points.length * .7)), height: Math.max(1, Math.abs(y - yPos(0))), class: 'analysis-mark' }) : svgEl('circle', { cx: x, cy: y, r: 3, class: 'analysis-mark' });
+        const title = svgEl('title'); title.textContent = `${xColumn?.name || 'Row'}: ${point.label} · ${data.columns[selection.y]?.name || 'Value'}: ${point.valueText}`; mark.append(title); svg.append(mark);
+      });
+      for (const [x, label] of [[left, ordered[0]?.label], [width - right, ordered.at(-1)?.label]]) {
+        const text = svgEl('text', { x, y: height - 21, 'text-anchor': x === left ? 'start' : 'end', class: 'analysis-axis-label' }); text.textContent = short(label, 18); svg.append(text);
+      }
+      target.append(svg);
+    }
+    if (points.length < data.rows.length) target.append(el('p', 'analysis-note', `${data.rows.length - points.length} rows have missing or unsupported axis values and are not plotted.`));
+  }
+  target.append(el('p', data.truncated || data.omitted ? 'analysis-note warning' : 'analysis-note', `${data.rows.length} saved rows loaded${data.omitted ? ` · ${data.omitted} more saved rows outside this view` : ''}${data.truncated ? ' · Query result was truncated when saved' : ''}`));
+}
+
 function renderPanel(snapshot) {
   const panel = $('detail');
   if (!state.panel) { panel.hidden = true; return; }
@@ -646,20 +726,26 @@ function renderPanel(snapshot) {
       }
       if (record?.kind === 'dataset') {
         section('Source', record.body?.source);
-        if (record.body?.schema?.length) list('Columns', record.body.schema.map(column => `${column.name || 'Column'} · ${column.type || 'unknown'}`));
+        const columns = Array.isArray(record.body?.schema) ? record.body.schema : [];
+        const rows = Array.isArray(record.body?.sample) ? record.body.sample : [];
+        if (columns.length) {
+          const preview = el('div', 'detail-section analysis-workspace'); preview.append(el('h3', '', 'Sample rows'));
+          const scroll = el('div', 'analysis-table-scroll'), table = el('table', 'result-preview');
+          const head = el('tr'); columns.forEach(column => head.append(el('th', '', column.name || 'Column'))); table.append(head);
+          for (const row of rows) {
+            const line = el('tr'); columns.forEach((column, index) => {
+              const value = Array.isArray(row) ? row[index] : undefined;
+              line.append(el('td', '', value == null ? 'null' : typeof value === 'object' ? JSON.stringify(value) : value));
+            }); table.append(line);
+          }
+          scroll.append(table); preview.append(scroll);
+          if (!rows.length) preview.append(el('p', 'analysis-note', 'No saved rows.'));
+          body.append(preview);
+        }
       }
       if (record?.kind === 'analysis') {
         section('SQL', record.body?.sql); section('Interpretation', record.body?.interpretation);
-        if (record.body?.rows?.length) {
-          const preview = el('div', 'detail-section'); preview.append(el('h3', '', 'Result preview'));
-          const table = el('table', 'result-preview');
-          const columns = (record.body.columns || []).map(column => typeof column === 'string' ? column : column.name).filter(Boolean);
-          if (columns.length) { const head = el('tr'); columns.forEach(column => head.append(el('th', '', column))); table.append(head); }
-          for (const row of record.body.rows.slice(0, 10)) {
-            const line = el('tr'); (Array.isArray(row) ? row : columns.map(column => row?.[column])).forEach(value => line.append(el('td', '', value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : value))); table.append(line);
-          }
-          preview.append(table); body.append(preview);
-        }
+        const workspace = el('div', 'detail-section analysis-workspace'); renderAnalysisWorkspace(workspace, record); body.append(workspace);
       }
       if (record) {
         const edges = (snapshot.graph?.edges || []).filter(edge => (edge.source === record.id || edge.target === record.id) && (record.kind !== 'task' || !['source', 'depends_on', 'child', 'related', 'contains'].includes(edge.relation)));
