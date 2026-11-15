@@ -27,7 +27,7 @@ See [Questions.md](Questions.md) for more prompts.
 - Offers to turn a substantive implementation plan into linked AgentBase tasks. After you accept, the `plan_tasks_create` MCP tool creates one task per selected milestone in a single idempotent operation.
 - Lets you review memory and decision nodes in Graph. You can compare possible duplicates, inspect sources and validity dates, then approve, correct, supersede, mark stale or disputed, reject, or forget a record. Review actions use version checks and appear in the record's recent changes.
 
-AgentBase does not call a model or send project data to a hosted service. The MCP server and project store run locally.
+The MCP server and project store run locally; AgentBase does not operate a hosted project-data service. The Inspector's optional **Your AI** judge sends the criteria, reference context, and submission you choose to the AI provider you configure when you press **Judge**. See [Privacy](PRIVACY.md).
 
 `context_get` and `project_resume` rank context by the current query, task links and scope, memory status, and freshness. They keep the packet within its character budget, collapse exact duplicate memory text, and return reasons for included records and a bounded preview of omissions. Keyword search stays local and works without embeddings or a model service.
 
