@@ -1,27 +1,29 @@
 # AgentBase
 
-**Open-source, local project memory for coding agents.** AgentBase keeps tasks, decisions, sources, and handoffs in a project database. Codex and Claude Code access it through MCP; the desktop app shows the graph, task board, and skills.
+[![Latest release](https://img.shields.io/github/v/release/SeanPreusse/agentbase?label=release)](https://github.com/SeanPreusse/agentbase/releases/latest) [![Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-![AgentBase Graph and Tasks views](docs/screenshots/showcase.gif)
+**Open-source project memory for coding agents.** Keep tasks, decisions, evidence, and handoffs in a local database that Codex and Claude Code can use through MCP. Explore and correct that context in the desktop app.
 
-## What can you ask?
+[Download for Windows](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-windows-x64.zip) · [Download for macOS](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-macos-arm64.pkg) · [See all releases](https://github.com/SeanPreusse/agentbase/releases/latest)
 
-![Example questions you can ask AgentBase about project work](docs/agentbase-question-guide.png)
+![AgentBase graph and task board](docs/screenshots/showcase.gif)
 
-See [more example questions](Questions.md).
+## Ask about your project
 
-## Download
+![Example questions you can ask AgentBase](docs/agentbase-question-guide.png)
 
-| Platform | Bundle |
+[More example questions](Questions.md)
+
+## Get started
+
+| Desktop app | Download and open |
 | --- | --- |
-| Windows 10/11 (x64) | [Download AgentBase for Windows](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-windows-x64.zip) |
-| macOS 14+ (Apple silicon) | [Download Mac installer](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-macos-arm64.pkg) · [App ZIP](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-macos-arm64.zip) |
+| Windows 10/11, x64 | Extract the [Windows ZIP](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-windows-x64.zip) and run `AgentBase.exe`. |
+| macOS 14+, Apple silicon | Open the [Mac installer](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-macos-arm64.pkg), or download the [app ZIP](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-macos-arm64.zip). |
 
-The bundles include Node.js and the AgentBase runtime. On Windows, extract the ZIP and run `AgentBase.exe`. The Mac package installs `AgentBase.app` in Applications. These direct downloads are not yet Microsoft Store signed or Apple notarized; your operating system may ask you to approve opening them. See the [release page](https://github.com/SeanPreusse/agentbase/releases/latest) for all assets.
+The desktop bundles include Node.js and the AgentBase runtime. They are awaiting store signing and Apple notarization, so your operating system may ask you to approve opening them.
 
-## Connect a coding agent
-
-Requires Node.js 22.22+ and Codex or Claude Code:
+To connect **Codex**, install the plugin from source with Node.js 22.22+:
 
 ```sh
 git clone https://github.com/SeanPreusse/agentbase.git
@@ -30,17 +32,17 @@ npm ci
 npm run plugin:up
 ```
 
-Start a new Codex session after installation. In the app, use **Connections** to inspect the local data folder. Codex and Claude Code share projects when both MCP servers use that folder (default: `~/.local/share/agentbase`). Ask your agent to resume the current workspace, track a task, or save a sourced decision.
+For **Claude Code**, build the same checkout with `npm run build`, then use the macOS app’s **Connections** view to install its MCP server, or configure Claude Code to run `node bin/agentbase.mjs serve` from the checkout. Restart the agent session, then ask it to resume your workspace or track a task. Point both agents at the same local data folder to share context (default: `~/.local/share/agentbase`).
 
-## What it does
+## What you can do
 
-- Keeps project knowledge, plans, tasks, and handoffs locally, with search and linked context.
-- Runs sandboxed SQL on imported CSV, JSON, JSONL, and Parquet data; saved results retain their query and provenance.
-- Backs up project records and imported data together.
-- Lets you review, correct, supersede, or forget saved memory from the graph.
+- **Pick up where you left off:** Find linked tasks, plans, sources, decisions, and handoffs across sessions.
+- **Inspect and correct memory:** Review the graph and task board, then supersede or forget records.
+- **Analyse project data:** Import CSV, JSON, JSONL, or Parquet and run sandboxed SQL with saved queries and provenance.
+- **Keep it portable:** Back up project records and imported data together.
 
-AgentBase does not run a hosted project-data service or silently collect conversations. Its optional **Your AI** feature sends only the material you choose to your configured AI provider when you press **Judge**. See [Privacy](PRIVACY.md).
+Project data stays local. AgentBase has no hosted project-data service or silent conversation collection. Optional **Your AI** sends only the material you select to your configured provider when you press **Judge**. Read the [privacy policy](PRIVACY.md).
 
-## Develop
+## Contribute
 
-Run `npm ci`, `npm test`, and `npm run test:ui` for macOS Inspector changes. Contributions are welcome through issues and pull requests. Licensed under [Apache-2.0](LICENSE).
+Issues and pull requests are welcome. See [contributing](CONTRIBUTING.md) for setup and checks. AgentBase is licensed under [Apache 2.0](LICENSE).
