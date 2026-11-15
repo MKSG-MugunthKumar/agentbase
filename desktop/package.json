@@ -6,17 +6,22 @@
   "main": "main.mjs",
   "scripts": {
     "start": "electron .",
-    "stage": "node ../scripts/stage-windows.mjs",
-    "build:windows": "npm run stage && electron-builder --win appx zip --x64"
+    "stage": "node ../scripts/stage-desktop.mjs",
+    "build:windows": "npm run stage && electron-builder --win appx zip --x64",
+    "build:windows-zip:cross": "AGENTBASE_DESKTOP_TARGET=win32 npm run stage && electron-builder --win zip --x64 --config.directories.output=../build/windows-cross",
+    "build:mac": "npm run stage && electron-builder --mac zip --config.directories.output=../build/mac-shared"
   },
   "build": {
     "appId": "dev.agentbase.inspector",
     "productName": "AgentBase",
     "files": [
       "main.mjs",
+      "connection-actions.mjs",
+      "memory-actions.mjs",
       "preload.cjs",
       "index.html",
       "renderer.js",
+      "view-model.mjs",
       "style.css",
       "assets/**"
     ],
@@ -37,6 +42,10 @@
       "target": [
         "appx"
       ],
+      "icon": "assets/app-icon.png"
+    },
+    "mac": {
+      "target": ["zip"],
       "icon": "assets/app-icon.png"
     },
     "appx": {

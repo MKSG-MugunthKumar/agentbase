@@ -43,6 +43,7 @@
     "prepack": "npm run build",
     "ui:build": "node scripts/native-ui.mjs",
     "ui": "node scripts/native-ui.mjs --open",
+    "ui:shared": "npm run build && npm start --prefix desktop",
     "release:mac": "node scripts/release-mac.mjs",
     "release:mac:store": "node scripts/release-mac-store.mjs",
     "test:ui": "node scripts/test-native-ui.mjs",

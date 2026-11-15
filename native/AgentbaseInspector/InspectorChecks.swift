@@ -266,6 +266,7 @@ import AppKit
         precondition(skillCatalog.filtered.map(\.id) == ["general"], "Older skills without a category remain in General")
         skillCatalog.load(home:model.home,projectID:Inspector.allProjectsID)
         precondition(skillCatalog.skills.isEmpty && skillCatalog.selectedID == nil, "All Projects clears the project catalog")
+        precondition(SkillTemplate.all.count == 7, "Shared skill templates load from the bundled resource")
         skillCatalog.beginNew(template:SkillTemplate.all.first(where:{$0.id == "review"})!,projectRoot:skillRoot.path)
         precondition(skillCatalog.category == "Coding" && skillCatalog.canSave && skillCatalog.createsFile)
         let firstSkillFile=try skillCatalog.createSkillFile()

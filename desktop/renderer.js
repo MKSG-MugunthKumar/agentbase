@@ -1,5 +1,7 @@
+import { taskGroup, taskSummary, visibleGraph, memoryComparisons } from './view-model.mjs';
+
 const $ = id => document.getElementById(id);
-const state = { view: 'graph', project: 'agentbase:all', record: '', skill: '', skillEditing: false, search: '', skillSearch: '', skillCategory: 'All', statusFilter: 'All', includeBackground: false, snapshot: null, loading: false, queued: false, panel: '', zoom: 1, panX: 0, panY: 0 };
+const state = { view: 'graph', project: 'agentbase:all', record: '', recordHistory: [], historyIndex: -1, detailExpanded: false, skill: '', skillEditing: false, editingSkill: '', newTemplate: null, skillTemplates: [], templateCategory: 'General', taskLimit: 200, search: '', skillSearch: '', skillCategory: 'All', statusFilter: 'All', paused: false, memoryDraft: null, memoryBusy: false, memoryMessage: '', includeBackground: false, hiddenKinds: new Set(['session']), orphans: true, localGraph: false, localDepth: 1, colorMode: 'none', labels: true, arrows: false, nodeSize: 1, linkWidth: 1, centerForce: .12, repelForce: 2200, linkForce: .015, linkDistance: 1, snapshot: null, loading: false, queued: false, panel: '', connectionStatus: null, connectionLoading: false, connectionActionBusy: false, connectionMessage: '', connectionRequest: 0, zoom: 1, panX: 0, panY: 0 };
 
 function el(tag, cls, value) {
   const node = document.createElement(tag);
@@ -12,7 +14,7 @@ function svgEl(tag, attrs = {}) {
   for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
   return node;
 }
-function titleOf(record) { return record?.body?.title || record?.body?.name || record?.body?.summary || record?.kind || 'Untitled'; }
+function titleOf(record) { return record?.body?.title || record?.title || record?.body?.name || record?.body?.summary || record?.kind || 'Untitled'; }
 function projectName(project) { return project?.root?.split(/[\\/]/).filter(Boolean).at(-1) || project?.name || 'Project'; }
 function short(value, limit = 110) { const text = String(value || '').trim(); return text.length > limit ? `${text.slice(0, limit - 1)}…` : text; }
 function empty(title, body = '') { const wrap = el('div', 'skills-empty'); const inner = el('div'); inner.append(el('h2', '', title), el('p', '', body)); wrap.append(inner); return wrap; }
@@ -21,7 +23,7 @@ async function refresh() {
   if (state.loading) { state.queued = true; return; }
   state.loading = true;
   try {
-    state.snapshot = await window.agentbase.snapshot({ project: state.project, record: state.record, search: state.search, includeBackground: state.includeBackground });
+    state.snapshot = await window.agentbase.snapshot({ project: state.project, record: state.record, search: state.search, includeBackground: state.includeBackground, taskLimit: state.taskLimit });
     render();
   } catch (error) { $('notice').textContent = `Could not open AgentBase: ${error.message}`; }
   finally { state.loading = false; if (state.queued) { state.queued = false; refresh(); } }
@@ -40,6 +42,7 @@ function render() {
   const snapshot = state.snapshot;
   if (!snapshot) return;
   renderProjects(snapshot);
+  $('project').disabled = state.skillEditing;
   document.body.dataset.view = state.view;
   $('notice').textContent = snapshot.status === 'error' ? snapshot.error : '';
   for (const tab of document.querySelectorAll('.tab')) tab.classList.toggle('active', tab.dataset.view === state.view);
@@ -52,53 +55,193 @@ function render() {
   $('graph-settings').hidden = state.view !== 'graph';
   $('fit').hidden = state.view !== 'graph';
   $('graph-count').textContent = state.view === 'graph' && snapshot.graph ? `${snapshot.graph.total_nodes ?? snapshot.graph.nodes?.length ?? 0} nodes · ${snapshot.graph.edges?.length ?? 0} links` : '';
+  $('load-more').hidden = true;
   $('search').placeholder = state.view === 'tasks' ? 'Search tasks' : state.project === 'agentbase:all' ? 'Search all projects' : 'Search project';
   if (snapshot.status === 'error') $('content').replaceChildren(empty('Could not open store', snapshot.error));
   else if (snapshot.status === 'empty') $('content').replaceChildren(empty('No projects yet', 'Choose another data folder or connect an agent to create a project.'));
   else if (state.view === 'tasks') renderTasks(snapshot);
   else if (state.view === 'skills') renderSkills(snapshot);
   else renderGraph(snapshot);
+  renderGraphSettings(snapshot);
+  renderSearchResults(snapshot);
   renderPanel(snapshot);
 }
 
-function selectRecord(id) { state.record = id; state.panel = 'record'; refresh(); }
+function settingToggle(label, value, change) {
+  const row = el('label', 'setting-row');
+  const input = el('input'); input.type = 'checkbox'; input.checked = value;
+  input.addEventListener('change', () => change(input.checked));
+  row.append(el('span', '', label), input);
+  return row;
+}
+function settingRange(label, value, min, max, step, change) {
+  const row = el('label', 'setting-range'); row.append(el('span', '', label));
+  const input = el('input'); input.type = 'range'; input.min = min; input.max = max; input.step = step; input.value = value;
+  input.addEventListener('input', () => change(Number(input.value)));
+  row.append(input); return row;
+}
+function renderGraphSettings(snapshot) {
+  const panel = $('settings-panel');
+  if (panel.hidden || state.view !== 'graph' || !snapshot) { panel.hidden = true; return; }
+  panel.replaceChildren(el('h2', '', 'Graph settings'), el('h3', '', 'Filters'));
+  panel.append(settingToggle('Orphans', state.orphans, checked => { state.orphans = checked; renderGraph(snapshot); }));
+  panel.append(settingToggle('Background records', state.includeBackground, checked => { state.includeBackground = checked; refresh(); }));
+  panel.append(settingToggle('Local graph', state.localGraph, checked => { state.localGraph = checked; renderGraphSettings(snapshot); renderGraph(snapshot); }));
+  if (state.localGraph) {
+    const depth = settingRange(`Depth: ${state.localDepth}`, state.localDepth, 1, 4, 1, value => { state.localDepth = value; depth.querySelector('span').textContent = `Depth: ${value}`; renderGraph(snapshot); });
+    panel.append(depth);
+  }
+  const kinds = [...new Set((snapshot.graph?.nodes || []).map(node => node.kind))].sort();
+  for (const kind of kinds) panel.append(settingToggle(kind[0].toUpperCase() + kind.slice(1), !state.hiddenKinds.has(kind), checked => { if (checked) state.hiddenKinds.delete(kind); else state.hiddenKinds.add(kind); renderGraph(snapshot); }));
+  panel.append(el('h3', '', 'Groups'));
+  const colors = el('label', 'setting-row'); colors.append(el('span', '', 'Color by'));
+  const select = el('select');
+  for (const [value, label] of [['none', 'None'], ['project', 'Project'], ['type', 'Node type']]) { const option = el('option', '', label); option.value = value; select.append(option); }
+  select.value = state.colorMode;
+  select.addEventListener('change', () => { state.colorMode = select.value; renderGraph(snapshot); });
+  colors.append(select); panel.append(colors, el('h3', '', 'Display'));
+  panel.append(settingToggle('Labels', state.labels, checked => { state.labels = checked; renderGraph(snapshot); }));
+  panel.append(settingToggle('Arrows', state.arrows, checked => { state.arrows = checked; renderGraph(snapshot); }));
+  panel.append(settingRange('Node size', state.nodeSize, .4, 2.5, .1, value => { state.nodeSize = value; renderGraph(snapshot); }));
+  panel.append(settingRange('Link thickness', state.linkWidth, .3, 3, .1, value => { state.linkWidth = value; renderGraph(snapshot); }));
+  panel.append(el('h3', '', 'Forces'));
+  panel.append(settingRange('Center force', state.centerForce, 0, .6, .01, value => { state.centerForce = value; renderGraph(snapshot); }));
+  panel.append(settingRange('Repel force', state.repelForce, 0, 8000, 100, value => { state.repelForce = value; renderGraph(snapshot); }));
+  panel.append(settingRange('Link force', state.linkForce, 0, .06, .001, value => { state.linkForce = value; renderGraph(snapshot); }));
+  panel.append(settingRange('Link distance', state.linkDistance, .4, 2.5, .1, value => { state.linkDistance = value; renderGraph(snapshot); }));
+  const reset = el('button', 'setting-reset', 'Restore defaults');
+  reset.addEventListener('click', () => { state.hiddenKinds = new Set(['session']); state.orphans = true; state.localGraph = false; state.localDepth = 1; state.colorMode = 'none'; state.labels = true; state.arrows = false; state.nodeSize = 1; state.linkWidth = 1; state.centerForce = .12; state.repelForce = 2200; state.linkForce = .015; state.linkDistance = 1; state.includeBackground = false; refresh(); });
+  panel.append(reset);
+}
+function renderSearchResults(snapshot) {
+  const results = $('search-results');
+  const search = snapshot.graph_search;
+  if (state.view !== 'graph' || !state.search.trim() || !search || search.query !== state.search.trim()) { results.hidden = true; return; }
+  results.hidden = false; results.replaceChildren();
+  if (!search.nodes?.length) { results.append(el('p', '', 'No matching records')); return; }
+  for (const node of search.nodes.slice(0, 12)) {
+    const button = el('button', 'search-result');
+    button.append(el('strong', '', node.title), el('small', '', node.kind + (node.summary ? ` · ${short(node.summary, 85)}` : '')));
+    button.addEventListener('click', () => { state.search = ''; $('search').value = ''; results.hidden = true; selectRecord(node.id); });
+    results.append(button);
+  }
+  if (search.omitted_matches) results.append(el('p', 'search-omitted', `${search.omitted_matches} more matches`));
+}
+
+function selectRecord(id) {
+  if (state.record !== id) { state.memoryDraft = null; state.memoryMessage = ''; }
+  if (state.recordHistory[state.historyIndex] !== id) {
+    state.recordHistory = state.recordHistory.slice(0, state.historyIndex + 1);
+    state.recordHistory.push(id); state.historyIndex = state.recordHistory.length - 1;
+  }
+  state.record = id; state.panel = 'record'; refresh();
+}
+
+function renderMemoryActions(body, record) {
+  if (['forgotten', 'superseded', 'rejected'].includes(record.body?.status)) return;
+  if (state.memoryDraft?.id !== record.id || state.memoryDraft.version !== record.version) {
+    state.memoryDraft = { id: record.id, version: record.version, title: titleOf(record), content: record.body?.content || '', source: record.body?.source || '', valid_from: record.body?.valid_from || '', valid_until: record.body?.valid_until || '', reason: '' };
+  }
+  const draft = state.memoryDraft;
+  const section = el('div', 'detail-section memory-actions');
+  section.append(el('h3', '', 'Review and correct'));
+  const field = (label, key, multi = false) => {
+    const wrap = el('label', 'memory-field'); wrap.append(el('span', '', label));
+    const input = el(multi ? 'textarea' : 'input'); input.value = draft[key]; input.disabled = state.memoryBusy;
+    input.addEventListener('input', () => { draft[key] = input.value; });
+    wrap.append(input); section.append(wrap);
+  };
+  const run = async action => {
+    if (state.memoryBusy) return;
+    state.memoryBusy = true; state.memoryMessage = '';
+    section.querySelectorAll('button').forEach(button => { button.disabled = true; });
+    try {
+      const result = await window.agentbase.memoryAction({ project_id: record.project_id, id: record.id, expected_version: record.version, action, ...draft });
+      if (!result.ok) { state.memoryMessage = result.error || 'Could not save memory.'; return; }
+      state.memoryMessage = 'Saved.';
+      if (action === 'forgotten' || action === 'reject') { state.panel = ''; state.record = ''; }
+      await refresh();
+    } catch (error) { state.memoryMessage = error.message; }
+    finally { state.memoryBusy = false; if (state.snapshot) renderPanel(state.snapshot); }
+  };
+  const action = (label, name, disabled = false) => {
+    const button = el('button', 'memory-action', label); button.disabled = state.memoryBusy || disabled;
+    button.addEventListener('click', () => run(name)); return button;
+  };
+  section.append(action('Approve memory', 'approve'));
+  field('Title', 'title'); field('Content', 'content', true); field('Source', 'source');
+  field('Valid from · YYYY-MM-DD', 'valid_from'); field('Valid until · YYYY-MM-DD', 'valid_until');
+  section.append(action('Save correction', 'edit'));
+  field('Reason for rejection, stale, disputed, or forgetting', 'reason');
+  const row = el('div', 'memory-action-row');
+  for (const [label, name] of [['Reject', 'reject'], ['Mark stale', 'stale'], ['Dispute', 'disputed'], ['Forget', 'forgotten']]) row.append(action(label, name));
+  section.append(row, el('p', 'detail-meta', 'Forgetting removes the stored content. The audit event keeps the action, actor, time, and version.'));
+  if (state.memoryMessage) section.append(el('p', 'editor-message', state.memoryMessage));
+  body.append(section);
+}
+function moveRecordHistory(offset) {
+  const index = state.historyIndex + offset;
+  if (index < 0 || index >= state.recordHistory.length) return;
+  state.historyIndex = index; state.record = state.recordHistory[index]; state.panel = 'record'; refresh();
+}
 function badge(status) {
   const label = status?.replaceAll('_', ' ') || 'open';
   const cls = status === 'blocked' ? 'blocked' : status === 'done' ? 'done' : ['active', 'in_progress'].includes(status) ? 'active' : '';
   return el('span', `status-badge ${cls}`, label);
 }
-function taskGroup(status) {
-  if (['done', 'cancelled'].includes(status)) return 'Done';
-  if (status === 'blocked') return 'Needs attention';
-  if (['active', 'in_progress', 'doing'].includes(status)) return 'Active';
-  return 'Queue';
-}
 function renderTasks(snapshot) {
   const projects = new Map((snapshot.projects || []).map(project => [project.id, projectName(project)]));
   const phrase = state.search.toLocaleLowerCase();
-  const tasks = (snapshot.records || []).filter(record => record.kind === 'task' && (!phrase || `${titleOf(record)} ${record.body?.description || ''}`.toLocaleLowerCase().includes(phrase)));
+  const tasks = (snapshot.records || []).filter(record => record.kind === 'task' && (!phrase || `${titleOf(record)} ${record.body?.description || ''} ${record.body?.owner || ''}`.toLocaleLowerCase().includes(phrase)));
   const filter = state.statusFilter;
   const names = filter === 'Done' ? ['Done'] : filter === 'Needs attention' ? ['Needs attention'] : filter === 'Open' ? ['Queue', 'Active', 'Needs attention'] : ['Queue', 'Active', 'Needs attention', 'Done'];
+  const shown = tasks.filter(record => names.includes(taskGroup(record))).length;
+  const loaded = (snapshot.records || []).filter(record => record.kind === 'task').length;
+  const older = Math.max(0, (snapshot.counts?.task || 0) - loaded);
+  $('graph-count').textContent = `${shown} of ${loaded} tasks` + (older ? ` · ${older} older tasks not loaded` : '') + (older && state.taskLimit >= 1000 ? ' · 1,000-task display limit' : '');
+  $('load-more').hidden = !older || state.taskLimit >= 1000;
+  $('load-more').disabled = state.paused;
+  $('load-more').title = state.paused ? 'Resume updates to load more tasks' : 'Load older saved tasks (up to 1,000)';
+  const workspace = el('div', 'board-workspace');
+  if (filter !== 'All' || state.search) {
+    const banner = el('div', 'board-filter-banner');
+    let explanation = `Showing ${shown} of ${loaded} tasks`;
+    if (!shown) {
+      if (state.search) explanation = 'No tasks match this search.';
+      else if (filter === 'Open') explanation = older ? 'No open tasks in the loaded records.' : loaded ? `All ${loaded} saved tasks are completed or cancelled.` : 'No open tasks recorded for this project.';
+      else if (filter === 'Needs attention') explanation = 'No loaded tasks need attention.';
+      else if (filter === 'Done') explanation = 'No completed or cancelled tasks in the loaded records.';
+    }
+    banner.append(el('strong', '', explanation), el('small', '', `Filter: ${filter}${state.search ? ` · Search: ${state.search}` : ''}`));
+    workspace.append(banner);
+  }
   const board = el('div', 'board');
-  board.style.gridTemplateColumns = `repeat(${names.length},minmax(0,1fr))`;
   for (const name of names) {
-    const matches = tasks.filter(record => taskGroup(record.body?.status) === name);
+    const matches = tasks.filter(record => taskGroup(record) === name);
     const column = el('section', 'board-column');
     const heading = el('div', `board-heading ${name === 'Done' ? 'done' : ''}`);
     heading.append(el('span', 'dot'), el('span', '', name), el('span', 'count', matches.length));
     column.append(heading);
-    if (!matches.length) column.append(el('p', 'board-empty', 'No tasks'));
+    if (!matches.length) column.append(el('p', 'board-empty', filter === 'All' && !state.search ? 'No tasks' : 'No matches'));
     for (const record of matches) {
       const card = el('button', `task-card${record.id === state.record && state.panel === 'record' ? ' selected' : ''}`);
       card.append(el('span', 'task-project', projects.get(record.project_id) || 'Project'), el('div', 'task-title', titleOf(record)), badge(record.body?.status));
-      if (record.body?.description) card.append(el('p', 'task-description', short(record.body.description, 155)));
+      if (record.body?.parent_task_id) {
+        const parent = snapshot.records?.find(item => item.id === record.body.parent_task_id);
+        card.append(el('p', 'task-parent', `↳ Subtask of ${parent ? titleOf(parent) : 'parent task'}`));
+      }
+      const summary = taskSummary(record);
+      if (summary) card.append(el('p', 'task-description', short(summary, 155)));
       if (record.body?.reason && name === 'Needs attention') card.append(el('p', 'task-reason', `◉  ${short(record.body.reason, 120)}`));
+      const blockers = (record.dependencies || []).filter(task => task.status !== 'done');
+      if (blockers.length) card.append(el('p', 'task-reason', `↗  Waiting for ${blockers.length} task${blockers.length === 1 ? '' : 's'}`));
+      if (record.body?.owner) card.append(el('p', 'task-owner', record.body.owner + (record.lease_active === false && ['in_progress', 'review'].includes(record.body.status) ? ' · Lease expired' : '')));
       card.addEventListener('click', () => selectRecord(record.id));
       column.append(card);
     }
     board.append(column);
   }
-  $('content').replaceChildren(board);
+  workspace.append(board); $('content').replaceChildren(workspace);
 }
 
 function graphPositions(nodes, edges) {
@@ -136,7 +279,7 @@ function graphPositions(nodes, edges) {
       const a = points.get(nodes[i].id), b = points.get(nodes[j].id);
       const dx = a.x - b.x || .01, dy = a.y - b.y || .01;
       const distance = Math.max(1, Math.hypot(dx, dy));
-      const repulsion = Math.min(6, 19000 / (distance * distance));
+      const repulsion = Math.min(6, 19000 * state.repelForce / 2200 / (distance * distance));
       const overlapX = Math.max(0, 192 - Math.abs(dx));
       const overlapY = Math.max(0, 50 - Math.abs(dy));
       const collision = overlapX && overlapY ? Math.min(7, Math.min(overlapX / 22, overlapY / 7)) : 0;
@@ -148,8 +291,8 @@ function graphPositions(nodes, edges) {
     for (const edge of links) {
       const a = points.get(edge.source), b = points.get(edge.target);
       const dx = b.x - a.x, dy = b.y - a.y, distance = Math.max(1, Math.hypot(dx, dy));
-      const strength = edge.relation === 'child' ? .025 : .018;
-      const pull = (distance - 140) * strength;
+      const strength = (edge.relation === 'child' ? .025 : .018) * state.linkForce / .015;
+      const pull = (distance - 140 * state.linkDistance) * strength;
       force.get(edge.source).x += dx / distance * pull;
       force.get(edge.source).y += dy / distance * pull;
       force.get(edge.target).x -= dx / distance * pull;
@@ -157,8 +300,8 @@ function graphPositions(nodes, edges) {
     }
     for (const node of nodes) {
       const point = points.get(node.id), speed = velocity.get(node.id), effect = force.get(node.id);
-      speed.x = (speed.x + effect.x - point.x * .001) * .78;
-      speed.y = (speed.y + effect.y - point.y * .001) * .78;
+      speed.x = (speed.x + effect.x - point.x * .001 * state.centerForce / .12) * .78;
+      speed.y = (speed.y + effect.y - point.y * .001 * state.centerForce / .12) * .78;
       point.x += Math.max(-12, Math.min(12, speed.x));
       point.y += Math.max(-12, Math.min(12, speed.y));
     }
@@ -202,26 +345,57 @@ function graphLabel(group, node, point) {
   });
   group.append(text);
 }
+const graphColors = {
+  project: '#e0e5ef', concept: '#a399f7', task: '#52ccb3', resource: '#e8b361',
+  dataset: '#e8b361', analysis: '#f17ba7', memory: '#6db2f5', decision: '#6db2f5', plan: '#ff9f28',
+};
+const projectColors = ['#52ccb3', '#a399f7', '#e8b361', '#6db2f5', '#f17ba7', '#ff9f28'];
+let cachedGraphLayout = { key: '', points: null };
 function renderGraph(snapshot) {
   const graph = snapshot.graph || { nodes: [], edges: [] };
   const shell = el('div', 'graph-view');
   if (!graph.nodes?.length) { shell.append(empty('No nodes yet', 'This graph grows as AgentBase records your project work.')); $('content').replaceChildren(shell); return; }
-  const nodes = [...graph.nodes].sort((a, b) => (b.kind === 'project') - (a.kind === 'project') || (b.degree || 0) - (a.degree || 0)).slice(0, 35);
+  const filtered = visibleGraph(graph, { hiddenKinds: state.hiddenKinds, orphans: state.orphans, localGraph: state.localGraph, localDepth: state.localDepth, focus: state.record });
+  const nodes = filtered.nodes.sort((a, b) => (b.id === state.record) - (a.id === state.record) || (b.kind === 'project') - (a.kind === 'project') || (b.degree || 0) - (a.degree || 0)).slice(0, 80);
+  if (!nodes.length) { shell.append(empty(state.localGraph && !state.record ? 'Select a node' : 'No visible nodes', state.localGraph && !state.record ? 'Select a graph node, then enable Local graph to focus its connections.' : 'Choose node types in Graph settings.')); $('content').replaceChildren(shell); return; }
   const ids = new Set(nodes.map(node => node.id));
-  const edges = (graph.edges || []).filter(edge => ids.has(edge.source) && ids.has(edge.target));
-  const points = graphPositions(nodes, edges);
+  const edges = filtered.edges.filter(edge => ids.has(edge.source) && ids.has(edge.target));
+  const layoutKey = JSON.stringify([nodes.map(node => [node.id, node.degree]), edges.map(edge => [edge.source, edge.target, edge.relation]), state.centerForce, state.repelForce, state.linkForce, state.linkDistance]);
+  if (cachedGraphLayout.key !== layoutKey) cachedGraphLayout = { key: layoutKey, points: graphPositions(nodes, edges) };
+  const points = cachedGraphLayout.points;
   const svg = svgEl('svg', { viewBox: '0 0 1100 720', role: 'img', 'aria-label': `Knowledge graph: ${nodes.length} nodes and ${edges.length} links` });
+  const owners = new Map();
+  for (const node of nodes.filter(node => node.kind === 'project')) owners.set(node.id, node.id);
+  for (const edge of edges.filter(edge => edge.relation === 'contains')) {
+    if (owners.has(edge.source)) owners.set(edge.target, owners.get(edge.source));
+    if (owners.has(edge.target)) owners.set(edge.source, owners.get(edge.target));
+  }
+  const palette = new Map(nodes.filter(node => node.kind === 'project').map((node, index) => [node.id, projectColors[index % projectColors.length]]));
   const viewport = svgEl('g');
   const transform = () => viewport.setAttribute('transform', `translate(${state.panX} ${state.panY}) scale(${state.zoom})`);
   transform();
+  const neighbors = new Set([state.record]);
+  for (const edge of edges) {
+    if (edge.source === state.record) neighbors.add(edge.target);
+    if (edge.target === state.record) neighbors.add(edge.source);
+  }
   for (const edge of edges) {
     const a = points.get(edge.source), b = points.get(edge.target);
-    viewport.append(svgEl('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'graph-edge' }));
+    const line = svgEl('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: `graph-edge${state.record && (edge.source === state.record || edge.target === state.record) ? ' active' : ''}${state.record && !neighbors.has(edge.source) && !neighbors.has(edge.target) ? ' dimmed' : ''}` });
+    line.style.strokeWidth = `${state.linkWidth * (state.record && (edge.source === state.record || edge.target === state.record) ? 1.2 : .7)}px`;
+    viewport.append(line);
+    if (state.arrows) {
+      const angle = Math.atan2(b.y - a.y, b.x - a.x), tipX = b.x - Math.cos(angle) * 12, tipY = b.y - Math.sin(angle) * 12;
+      viewport.append(svgEl('polyline', { points: `${tipX - Math.cos(angle - .45) * 5},${tipY - Math.sin(angle - .45) * 5} ${tipX},${tipY} ${tipX - Math.cos(angle + .45) * 5},${tipY - Math.sin(angle + .45) * 5}`, class: 'graph-arrow' }));
+    }
   }
   for (const node of nodes) {
     const point = points.get(node.id), group = svgEl('g', { class: 'graph-hit', tabindex: '0' });
-    group.append(svgEl('circle', { cx: point.x, cy: point.y, r: node.kind === 'project' ? 8 : 6, class: `graph-node${node.id === state.record ? ' selected' : ''}` }));
-    graphLabel(group, node, point);
+    if (state.record && !neighbors.has(node.id)) group.classList.add('dimmed');
+    const circle = svgEl('circle', { cx: point.x, cy: point.y, r: Math.min(13, 3 + Math.sqrt(Math.max(0, node.degree || 0)) * 1.1) * state.nodeSize, class: `graph-node${node.id === state.record ? ' selected' : ''}` });
+    circle.style.setProperty('--node-color', state.colorMode === 'type' ? graphColors[node.kind] || '#aaa' : state.colorMode === 'project' ? palette.get(owners.get(node.id)) || '#aaa' : '#aaa');
+    group.append(circle);
+    if (state.labels) graphLabel(group, node, point);
     const tip = svgEl('title'); tip.textContent = node.title; group.append(tip);
     group.addEventListener('click', event => { event.stopPropagation(); selectRecord(node.id); });
     group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') selectRecord(node.id); });
@@ -234,6 +408,16 @@ function renderGraph(snapshot) {
   svg.addEventListener('pointerup', () => { drag = null; svg.classList.remove('dragging'); });
   svg.addEventListener('wheel', event => { event.preventDefault(); state.zoom = Math.max(.35, Math.min(2.5, state.zoom * (event.deltaY < 0 ? 1.1 : .9))); transform(); }, { passive: false });
   $('content').replaceChildren(shell);
+}
+
+async function showSkillInstructions(section, skill) {
+  const content = el('pre', 'skill-instructions', 'Loading…');
+  section.append(content, el('code', 'skill-source', skill.body?.source || 'No source'));
+  let result;
+  try { result = await window.agentbase.skillInstructions({ project: skill.project_id, skill: skill.id }); }
+  catch (error) { result = { ok: false, error: error.message }; }
+  if (!section.isConnected) return;
+  content.textContent = result.ok ? result.instructions || 'No instructions in this file.' : result.error || 'Instructions unavailable.';
 }
 
 function renderSkills(snapshot) {
@@ -256,54 +440,120 @@ function renderSkills(snapshot) {
   for (const record of skills) {
     const card = el('button', `skill-card${record.id === state.skill ? ' selected' : ''}`);
     card.append(el('strong', '', titleOf(record)), el('small', '', record.body?.description || ''));
+    if (record.body?.status === 'disabled') card.append(el('small', 'skill-disabled', 'Disabled'));
     card.addEventListener('click', () => { state.skill = record.id; renderSkills(snapshot); }); list.append(card);
   }
   if (!skills.length) list.append(el('p', 'board-empty', 'No skills'));
   const selected = skills.find(record => record.id === state.skill);
-  if (state.skillEditing) renderSkillEditor(detail);
+  if (state.skillEditing) renderSkillEditor(detail, all.find(record => record.id === state.editingSkill));
   else if (selected) {
-    detail.append(el('h1', '', titleOf(selected)), el('p', '', selected.body?.description || ''));
+    const heading = el('div', 'skill-detail-heading'); heading.append(el('h1', '', titleOf(selected)));
+    const edit = el('button', '', 'Edit'); edit.addEventListener('click', () => { state.editingSkill = selected.id; state.skillEditing = true; renderSkills(snapshot); }); heading.append(edit);
+    detail.append(heading, el('p', '', selected.body?.description || ''));
+    if (selected.body?.status === 'disabled') detail.append(el('p', 'skill-disabled', 'Disabled'));
     if (selected.body?.triggers?.length) { detail.append(el('h2', '', 'Use when')); for (const trigger of selected.body.triggers) detail.append(el('div', 'trigger', trigger)); }
-    if (selected.body?.source) { const section = el('details'); section.append(el('summary', '', 'Details'), el('p', '', selected.body.source)); detail.append(section); }
-    if (selected.body?.tags?.length) { const section = el('details'); section.append(el('summary', '', 'Tags'), el('p', '', selected.body.tags.join(', '))); detail.append(section); }
+    if (selected.body?.source) {
+      const section = el('details'); section.append(el('summary', '', 'Instructions'));
+      section.addEventListener('toggle', () => { if (section.open && !section.querySelector('.skill-instructions')) showSkillInstructions(section, selected); });
+      detail.append(section);
+    }
+    const section = el('details'); section.append(el('summary', '', 'Details'), el('p', '', `Category: ${selected.body?.category || 'General'}`));
+    if (selected.body?.tags?.length) section.append(el('p', '', `Tags: ${selected.body.tags.join(', ')}`));
+    if (selected.body?.applies_to?.length) section.append(el('p', '', `Applies to: ${selected.body.applies_to.join(', ')}`));
+    detail.append(section);
   } else detail.append(empty('Select a skill', 'Browse the project catalog.'));
   view.append(list, detail); $('content').replaceChildren(view);
 }
 
-function renderSkillEditor(target) {
+function renderSkillEditor(target, selected) {
+  const template = selected ? null : state.newTemplate;
   const form = el('form', 'skill-editor');
-  form.append(el('h1', '', 'New skill'));
-  const field = (label, tag = 'input') => {
+  form.append(el('h1', '', selected ? 'Edit skill' : 'New skill'));
+  const field = (label, tag = 'input', value = '') => {
     const wrap = el('label', 'editor-field'); wrap.append(el('span', '', label));
     const input = el(tag); input.name = label.toLowerCase().replaceAll(' ', '_'); input.required = ['Title', 'Description', 'Instructions'].includes(label);
+    input.value = value;
     wrap.append(input); form.append(wrap); return input;
   };
-  field('Title'); field('Description');
+  field('Title', 'input', selected?.body?.title || (template?.id === 'blank' ? '' : template?.title) || ''); field('Description', 'textarea', selected?.body?.description || (template?.id === 'blank' ? '' : template?.description) || '');
   const category = el('select'); category.name = 'category';
   for (const name of ['General', 'Coding', 'Research', 'Data', 'Planning', 'Writing']) category.append(el('option', '', name));
+  category.value = selected?.body?.category || template?.category || 'General';
   const categoryWrap = el('label', 'editor-field'); categoryWrap.append(el('span', '', 'Category'), category); form.append(categoryWrap);
-  field('Use when', 'textarea'); field('Instructions', 'textarea');
+  const status = el('select'); status.name = 'status';
+  for (const name of ['active', 'disabled']) { const option = el('option', '', name === 'active' ? 'Active' : 'Disabled'); option.value = name; status.append(option); }
+  status.value = selected?.body?.status || 'active';
+  const statusWrap = el('label', 'editor-field'); statusWrap.append(el('span', '', 'Status'), status); form.append(statusWrap);
+  field('Use when', 'textarea', (selected?.body?.triggers || template?.triggers || []).join('\n'));
+  field('Tags', 'textarea', (selected?.body?.tags || template?.tags || []).join('\n'));
+  field('Applies to', 'textarea', (selected?.body?.applies_to || template?.appliesTo || []).join('\n'));
+  if (selected) { const source = field('Source reference', 'input', selected.body?.source || ''); source.required = true; }
+  else field('Instructions', 'textarea', template?.instructions || '');
   const message = el('p', 'editor-message');
   const actions = el('div', 'editor-actions');
-  const cancel = el('button', '', 'Cancel'); cancel.type = 'button'; cancel.addEventListener('click', () => { state.skillEditing = false; renderSkills(state.snapshot); });
-  const save = el('button', 'save-button', 'Create skill'); save.type = 'submit'; actions.append(cancel, save); form.append(message, actions);
+  const cancel = el('button', '', 'Cancel'); cancel.type = 'button'; cancel.addEventListener('click', () => { state.skillEditing = false; state.newTemplate = null; renderSkills(state.snapshot); });
+  const save = el('button', 'save-button', selected ? 'Save skill' : 'Create skill'); save.type = 'submit'; actions.append(cancel, save); form.append(message, actions);
   form.addEventListener('submit', async event => {
     event.preventDefault(); save.disabled = true; message.textContent = 'Saving…';
     const values = new FormData(form);
-    const result = await window.agentbase.saveSkill({ project_id: state.project, title: values.get('title'), description: values.get('description'), category: values.get('category'), triggers: values.get('use_when'), instructions: values.get('instructions') });
-    if (result.ok) { state.skillEditing = false; state.skill = result.id; await refresh(); }
+    const result = await window.agentbase.saveSkill({ project_id: state.project, id: selected?.id, expected_version: selected?.version, title: values.get('title'), description: values.get('description'), category: values.get('category'), status: values.get('status'), triggers: values.get('use_when'), tags: values.get('tags'), applies_to: values.get('applies_to'), source: values.get('source_reference'), instructions: values.get('instructions') });
+    if (result.ok) { state.skillEditing = false; state.editingSkill = ''; state.newTemplate = null; state.skill = result.id; await refresh(); }
     else { message.textContent = result.error || 'Could not save skill.'; save.disabled = false; }
   });
   target.append(form);
+}
+
+function renderTemplatePicker() {
+  const overlay = $('template-picker'); overlay.hidden = false;
+  const dialog = el('div', 'template-dialog');
+  const top = el('div', 'template-header'); top.append(el('h2', '', 'New skill'));
+  const close = el('button', '', 'Cancel'); close.addEventListener('click', () => { overlay.hidden = true; }); top.append(close);
+  const layout = el('div', 'template-layout'), categories = el('div', 'template-categories'), choices = el('div', 'template-choices');
+  for (const name of [...new Set(state.skillTemplates.map(item => item.category))]) {
+    const button = el('button', name === state.templateCategory ? 'selected' : '', name);
+    button.addEventListener('click', () => { state.templateCategory = name; renderTemplatePicker(); }); categories.append(button);
+  }
+  for (const template of state.skillTemplates.filter(item => item.category === state.templateCategory)) {
+    const button = el('button', 'template-choice');
+    button.append(el('strong', '', template.title), el('span', '', template.summary));
+    button.addEventListener('click', () => { overlay.hidden = true; state.newTemplate = template; state.editingSkill = ''; state.skillEditing = true; renderSkills(state.snapshot); }); choices.append(button);
+  }
+  if (!choices.childNodes.length) choices.append(el('p', '', 'Templates are unavailable. Rebuild the desktop app.'));
+  layout.append(categories, choices); dialog.append(top, layout, el('p', 'template-note', 'Creates a SKILL.md in this project.')); overlay.replaceChildren(dialog);
 }
 
 function renderPanel(snapshot) {
   const panel = $('detail');
   if (!state.panel) { panel.hidden = true; return; }
   panel.hidden = false;
-  const header = el('div', 'detail-header'); header.append(el('span', '', state.panel === 'record' ? 'Record' : state.panel === 'history' ? 'Recent changes' : 'Connections'));
-  const close = el('button', '', '×'); close.setAttribute('aria-label', 'Close details'); close.addEventListener('click', () => { state.panel = ''; renderPanel(snapshot); }); header.append(close);
+  panel.classList.toggle('expanded', state.detailExpanded && state.panel === 'record');
+  const header = el('div', 'detail-header');
+  if (state.panel === 'record') {
+    for (const [offset, label, title] of [[-1, '‹', 'Previous record'], [1, '›', 'Next record']]) {
+      const button = el('button', '', label); button.title = title; button.disabled = state.historyIndex + offset < 0 || state.historyIndex + offset >= state.recordHistory.length;
+      button.addEventListener('click', () => moveRecordHistory(offset)); header.append(button);
+    }
+  }
+  header.append(el('span', 'detail-header-title', state.panel === 'record' ? 'Details' : state.panel === 'history' ? 'Recent changes' : 'Connections'));
+  if (state.panel === 'record') {
+    const selected = snapshot.records?.find(item => item.id === state.record);
+    const switchView = el('button', '', state.view === 'tasks' ? '◎' : '▣'); switchView.title = state.view === 'tasks' ? 'Show in graph' : 'Show on board';
+    switchView.addEventListener('click', () => { state.view = state.view === 'tasks' ? 'graph' : 'tasks'; refresh(); });
+    if (selected?.kind === 'task') header.append(switchView);
+    const expand = el('button', '', state.detailExpanded ? '⤢' : '⤡'); expand.title = state.detailExpanded ? 'Restore details' : 'Expand details';
+    expand.addEventListener('click', () => { state.detailExpanded = !state.detailExpanded; renderPanel(snapshot); }); header.append(expand);
+  }
+  const close = el('button', '', '×'); close.setAttribute('aria-label', 'Close details'); close.addEventListener('click', () => { state.panel = ''; state.record = ''; state.detailExpanded = false; refresh(); }); header.append(close);
   const body = el('div');
+  const section = (title, value) => {
+    if (value == null || value === '') return;
+    const wrap = el('div', 'detail-section'); wrap.append(el('h3', '', title), el('p', '', String(value))); body.append(wrap);
+  };
+  const list = (title, values) => {
+    if (!Array.isArray(values) || !values.length) return;
+    const wrap = el('div', 'detail-section'); wrap.append(el('h3', '', title));
+    const items = el('ul'); values.forEach(value => items.append(el('li', '', typeof value === 'string' ? value : JSON.stringify(value)))); wrap.append(items); body.append(wrap);
+  };
   if (state.panel === 'record') {
     const record = (snapshot.records || []).find(item => item.id === state.record);
     const node = (snapshot.graph?.nodes || []).find(item => item.id === state.record);
@@ -312,42 +562,228 @@ function renderPanel(snapshot) {
       if (record?.body?.status) {
         const line = el('div', 'detail-line'); line.append(badge(record.body.status), el('span', 'detail-meta', `Updated ${new Date(record.updated_at).toLocaleDateString('en-AU')}`)); body.append(line);
       }
-      body.append(el('div', 'detail-body', record?.body?.description || record?.body?.content || node?.summary || ''));
+      const primary = record?.body?.description || record?.body?.content || node?.summary;
+      if (primary) body.append(el('div', 'detail-body', primary));
       if (record?.body?.acceptance?.length) {
         const section = el('div', 'detail-section'); section.append(el('h3', '', 'Acceptance criteria'));
         const list = el('ul'); for (const criterion of record.body.acceptance) list.append(el('li', '', criterion)); section.append(list); body.append(section);
       }
       if (record?.body?.reason) { const section = el('div', 'detail-section'); section.append(el('h3', '', 'Reason'), el('p', '', record.body.reason)); body.append(section); }
+      if (record?.kind === 'task') {
+        for (const key of ['owner', 'progress']) {
+          if (record.body?.[key]) { const section = el('div', 'detail-section'); section.append(el('h3', '', key === 'owner' ? 'Owner' : 'Progress'), el('p', '', record.body[key])); body.append(section); }
+        }
+        const linkedTask = (id, label) => {
+          if (!id) return;
+          const item = snapshot.records?.find(value => value.id === id);
+          const button = el('button', 'detail-link', `${label}: ${item ? titleOf(item) : id}`);
+          button.addEventListener('click', () => selectRecord(id)); body.append(button);
+        };
+        linkedTask(record.body.plan_id, 'Plan');
+        linkedTask(record.body.parent_task_id, 'Parent task');
+        const children = (snapshot.records || []).filter(item => item.kind === 'task' && item.body?.parent_task_id === record.id);
+        if (children.length) {
+          const section = el('div', 'detail-section'); section.append(el('h3', '', 'Subtasks'));
+          for (const child of children) { const button = el('button', 'detail-link', titleOf(child)); button.addEventListener('click', () => selectRecord(child.id)); section.append(button, badge(child.body?.status)); }
+          body.append(section);
+        }
+        if (record.dependencies?.length) {
+          const section = el('div', 'detail-section'); section.append(el('h3', '', 'Dependencies'));
+          for (const dependency of record.dependencies) { const button = el('button', 'detail-link', dependency.title || 'Task'); button.addEventListener('click', () => selectRecord(dependency.id)); section.append(button, badge(dependency.status)); }
+          body.append(section);
+        }
+        if (record.body.completion?.summary) { const section = el('div', 'detail-section'); section.append(el('h3', '', 'Completion · agent reported'), el('p', '', record.body.completion.summary)); body.append(section); }
+        const recorded = record.body.sources || [];
+        const suggested = (snapshot.focused_record_id === record.id ? snapshot.skill_recommendations || [] : [])
+          .filter(skill => !recorded.some(source => source.reference === skill.id))
+          .map(skill => ({ kind: 'Suggested skill', title: skill.title, reference: skill.id, note: skill.description, record_id: skill.id }));
+        const sources = [...recorded, ...(record.body.completion?.evidence || []), ...suggested];
+        if (sources.length) {
+          const section = el('details', 'detail-section'); section.append(el('summary', '', `Sources (${sources.length})`));
+          for (const source of sources) {
+            const item = el('div', 'source-item');
+            const linked = source.record_id || (typeof source.reference === 'string' && /^(skill|analysis|memory|decision|task|plan|dataset|checkpoint)_/u.test(source.reference) ? source.reference : '');
+            if (linked) { const button = el('button', 'detail-link', source.title || source.kind || 'Source'); button.addEventListener('click', () => selectRecord(linked)); item.append(button); }
+            else item.append(el('strong', '', source.title || source.kind || 'Source'));
+            item.append(el('span', '', source.note || source.outcome || source.reference || ''));
+            if (source.reference) item.append(el('code', '', source.reference));
+            section.append(item);
+          }
+          body.append(section);
+        }
+      }
+      if (record?.kind === 'checkpoint') {
+        section('Handoff', record.body?.summary); section('Next action', record.body?.next_action);
+        list('Remaining', record.body?.remaining); list('Blockers', record.body?.blockers); list('Completed', record.body?.completed);
+      }
+      if (record?.kind === 'plan') {
+        section('Goal', record.body?.goal);
+        for (const [index, milestone] of (record.body?.milestones || []).entries()) section(`${index + 1}. ${milestone.title || 'Milestone'}`, milestone.acceptance);
+        list('Constraints', record.body?.constraints); list('Open questions', record.body?.open_questions);
+      }
+      if (record?.kind === 'memory' || record?.kind === 'decision') {
+        section('Source', record.body?.source); section('Evidence', record.body?.epistemic_status);
+        section('Scope', record.body?.scope);
+        if (record.body?.valid_from || record.body?.valid_until) section('Valid', `${record.body?.valid_from || 'open'} → ${record.body?.valid_until || 'open'}`);
+        section('Review', record.body?.review_status || 'unreviewed'); section('Status reason', record.body?.status_reason);
+        if (record.body?.task_id) {
+          const link = el('button', 'detail-link', `Task: ${record.body.task_id}`);
+          link.addEventListener('click', () => selectRecord(record.body.task_id)); body.append(link);
+        }
+        const comparisons = memoryComparisons(record, snapshot.records || []);
+        if (comparisons.length) {
+          const wrap = el('div', 'detail-section'); wrap.append(el('h3', '', 'Compare before deciding'));
+          for (const match of comparisons) {
+            const button = el('button', 'comparison-item');
+            button.append(el('strong', '', `${match.label} · ${titleOf(match.entry)}`), el('span', '', short(match.entry.body?.content, 130)));
+            button.addEventListener('click', () => selectRecord(match.entry.id)); wrap.append(button);
+          }
+          body.append(wrap);
+        }
+        const events = (snapshot.events || []).filter(event => event.record_id === record.id).slice(0, 8);
+        if (events.length) list('Recent changes', events.map(event => `${event.action.replaceAll('_', ' ')} · ${event.actor}`));
+        renderMemoryActions(body, record);
+      }
+      if (record?.kind === 'dataset') {
+        section('Source', record.body?.source);
+        if (record.body?.schema?.length) list('Columns', record.body.schema.map(column => `${column.name || 'Column'} · ${column.type || 'unknown'}`));
+      }
+      if (record?.kind === 'analysis') {
+        section('SQL', record.body?.sql); section('Interpretation', record.body?.interpretation);
+        if (record.body?.rows?.length) {
+          const preview = el('div', 'detail-section'); preview.append(el('h3', '', 'Result preview'));
+          const table = el('table', 'result-preview');
+          const columns = (record.body.columns || []).map(column => typeof column === 'string' ? column : column.name).filter(Boolean);
+          if (columns.length) { const head = el('tr'); columns.forEach(column => head.append(el('th', '', column))); table.append(head); }
+          for (const row of record.body.rows.slice(0, 10)) {
+            const line = el('tr'); (Array.isArray(row) ? row : columns.map(column => row?.[column])).forEach(value => line.append(el('td', '', value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : value))); table.append(line);
+          }
+          preview.append(table); body.append(preview);
+        }
+      }
+      if (record) {
+        const edges = (snapshot.graph?.edges || []).filter(edge => (edge.source === record.id || edge.target === record.id) && (record.kind !== 'task' || !['source', 'depends_on', 'child', 'related', 'contains'].includes(edge.relation)));
+        if (edges.length) {
+          const wrap = el('div', 'detail-section'); wrap.append(el('h3', '', record.kind === 'task' ? 'Other connections' : 'Graph connections'));
+          for (const edge of edges.slice(0, 30)) {
+            const id = edge.source === record.id ? edge.target : edge.source;
+            const related = snapshot.records?.find(item => item.id === id) || snapshot.graph?.nodes?.find(item => item.id === id);
+            const button = el('button', 'detail-link', related ? titleOf(related) : id);
+            button.addEventListener('click', () => selectRecord(id)); wrap.append(button);
+          }
+          body.append(wrap);
+        }
+      }
       if (record) { const section = el('details', 'detail-section'); section.append(el('summary', '', 'Full record'), el('pre', '', JSON.stringify(record.body, null, 2))); body.append(section); }
     } else body.append(el('p', 'detail-body', 'This item is outside the current project.'));
   } else if (state.panel === 'history') {
     const events = (snapshot.events || []).slice(0, 30);
     if (!events.length) body.append(el('p', 'detail-body', 'No recent changes.'));
-    for (const event of events) { const section = el('div', 'detail-section'); section.append(el('h3', '', event.record_title || event.kind || 'Change'), el('p', '', `${event.action || event.type || 'Updated'} · ${event.at ? new Date(event.at).toLocaleString('en-AU') : ''}`)); body.append(section); }
+    for (const event of events) { const section = el('button', 'history-item'); section.append(el('h3', '', event.record_title || event.kind || 'Change'), el('p', '', `${event.action || event.type || 'Updated'} · ${event.actor || ''} · ${event.at ? new Date(event.at).toLocaleString('en-AU') : ''}`)); section.addEventListener('click', () => selectRecord(event.record_id)); body.append(section); }
   } else {
     body.append(el('h2', 'detail-title', 'Connections'), el('p', 'detail-body', 'AgentBase reads the local project store used by your coding agents. Choose the same data folder that your Codex or Claude Code connection uses.'));
+    const hosts = state.connectionStatus;
+    for (const [key, title] of [['codex', 'Codex'], ['claude', 'Claude Code']]) {
+      const host = hosts?.[key];
+      const row = el('div', 'connection-host');
+      const identity = el('div', 'connection-identity');
+      identity.append(el('strong', '', title), el('span', '', !host ? state.connectionLoading ? 'Checking…' : 'Not checked' : !host.ok ? host.error || 'Setup unavailable' : host.installed ? host.enabled ? host.message || 'Connected' : 'Disabled' : host[`${key}_available`] === false ? `${title} CLI not found` : 'Not installed'));
+      row.append(identity);
+      if (host?.ok && host[`${key}_available`] !== false) {
+        const actions = el('div', 'connection-actions');
+        const names = key === 'codex' ? host.installed ? [host.enabled ? ['disable', 'Disable'] : ['enable', 'Enable'], ['check', 'Check']] : [['install', 'Install']] : host.installed ? [['check', 'Check'], ['remove', 'Remove']] : [['install', 'Install']];
+        for (const [action, label] of names) {
+          const button = el('button', '', label);
+          button.disabled = state.connectionActionBusy || state.connectionLoading || action === 'install' && host.install_available !== true;
+          button.addEventListener('click', () => runConnectionAction(key, action)); actions.append(button);
+        }
+        row.append(actions);
+      }
+      body.append(row);
+    }
+    if (state.connectionMessage) body.append(el('p', 'connection-message', state.connectionMessage));
+    if (hosts) {
+      const paths = [hosts.codex, hosts.claude].filter(host => host?.ok && host.installed && host.store_path && host.store_path_source !== 'unknown').map(host => host.store_path);
+      window.agentbase.storePath().then(path => { if (state.panel === 'connections' && paths.some(value => value !== path)) body.append(el('p', 'connection-warning', 'A connected host uses a different data folder. Check its MCP configuration before relying on shared memory.')); });
+    }
+    const check = el('button', 'detail-link', state.connectionLoading ? 'Checking…' : 'Refresh connections'); check.disabled = state.connectionLoading || state.connectionActionBusy; check.addEventListener('click', loadConnections); body.append(check);
     window.agentbase.storePath().then(path => { if (state.panel === 'connections') { const label = el('p', 'detail-body', `Data folder: ${path}`); body.append(label); } });
-    const choose = el('button', 'task-card', 'Choose data folder…'); choose.addEventListener('click', async () => { await window.agentbase.chooseStore(); state.project = 'agentbase:all'; state.record = ''; state.panel = ''; refresh(); }); body.append(choose);
+    const choose = el('button', 'task-card', 'Choose data folder…'); choose.addEventListener('click', async () => { await window.agentbase.chooseStore(); state.project = 'agentbase:all'; state.record = ''; state.panel = ''; state.connectionStatus = null; state.connectionRequest++; refresh(); }); body.append(choose);
   }
   panel.replaceChildren(header, body);
 }
 
-document.querySelectorAll('.tab').forEach(button => button.addEventListener('click', () => { state.view = button.dataset.view; state.panel = ''; state.record = ''; state.skillEditing = false; state.search = ''; $('search').value = ''; refresh(); }));
-$('project').addEventListener('change', event => { state.project = event.target.value; state.record = ''; state.skill = ''; state.skillEditing = false; state.skillCategory = 'All'; state.panel = ''; state.zoom = 1; state.panX = 0; state.panY = 0; refresh(); });
+async function runConnectionAction(host, action) {
+  if (state.connectionActionBusy || state.connectionLoading) return;
+  state.connectionActionBusy = true; state.connectionMessage = `${action[0].toUpperCase() + action.slice(1)} in progress…`;
+  renderPanel(state.snapshot);
+  try {
+    const result = await window.agentbase.connectionAction({ host, action });
+    state.connectionMessage = result.ok ? result.message || 'Connection updated. Start a new agent session if prompted.' : result.error || 'Connection action failed.';
+  } catch (error) { state.connectionMessage = error.message; }
+  finally { state.connectionActionBusy = false; await loadConnections(); }
+}
+
+async function loadConnections() {
+  const request = ++state.connectionRequest;
+  state.connectionLoading = true; state.connectionStatus = null;
+  if (state.panel === 'connections') renderPanel(state.snapshot);
+  try {
+    const result = await window.agentbase.connectionStatus();
+    if (request === state.connectionRequest) state.connectionStatus = result;
+  } catch (error) {
+    if (request === state.connectionRequest) state.connectionStatus = { codex: { ok: false, error: error.message }, claude: { ok: false, error: error.message } };
+  } finally {
+    if (request === state.connectionRequest) { state.connectionLoading = false; if (state.panel === 'connections') renderPanel(state.snapshot); }
+  }
+}
+
+document.querySelectorAll('.tab').forEach(button => button.addEventListener('click', () => { state.view = button.dataset.view; state.panel = ''; state.record = ''; state.detailExpanded = false; state.skillEditing = false; state.editingSkill = ''; state.search = ''; $('search').value = ''; refresh(); }));
+$('project').addEventListener('change', event => { state.project = event.target.value; state.record = ''; state.recordHistory = []; state.historyIndex = -1; state.detailExpanded = false; state.skill = ''; state.skillEditing = false; state.skillCategory = 'All'; state.panel = ''; state.zoom = 1; state.panX = 0; state.panY = 0; refresh(); });
 $('status').addEventListener('change', event => { state.statusFilter = event.target.value; render(); });
 $('search').addEventListener('input', event => { state.search = event.target.value; clearTimeout(window.searchTimer); window.searchTimer = setTimeout(refresh, 250); });
+$('search').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && state.view === 'graph' && state.snapshot?.graph_search?.nodes?.length) {
+    event.preventDefault(); state.search = ''; $('search').value = ''; $('search-results').hidden = true; selectRecord(state.snapshot.graph_search.nodes[0].id);
+  }
+});
 $('refresh').addEventListener('click', refresh);
 $('history').addEventListener('click', () => { state.panel = 'history'; renderPanel(state.snapshot); });
-$('connections').addEventListener('click', () => { state.panel = 'connections'; renderPanel(state.snapshot); });
+$('connections').addEventListener('click', () => { state.panel = 'connections'; state.connectionMessage = ''; renderPanel(state.snapshot); loadConnections(); });
 $('fit').addEventListener('click', () => { state.zoom = 1; state.panX = 0; state.panY = 0; render(); });
-$('graph-settings').addEventListener('click', () => { state.includeBackground = !state.includeBackground; $('graph-settings').title = state.includeBackground ? 'Show content only' : 'Show background records'; refresh(); });
-$('new-skill').addEventListener('click', () => { if (state.project === 'agentbase:all') return; state.skillEditing = true; renderSkills(state.snapshot); });
+$('load-more').addEventListener('click', () => { state.taskLimit = Math.min(1000, state.taskLimit + 200); refresh(); });
+$('graph-settings').addEventListener('click', () => { $('settings-panel').hidden = !$('settings-panel').hidden; renderGraphSettings(state.snapshot); });
+$('new-skill').addEventListener('click', () => { if (state.project === 'agentbase:all') return; renderTemplatePicker(); });
 $('more').addEventListener('click', () => {
   const menu = $('menu'); menu.hidden = !menu.hidden;
   if (menu.hidden) return;
   const choose = el('button', '', 'Choose data folder…'); choose.addEventListener('click', async () => { menu.hidden = true; await window.agentbase.chooseStore(); state.project = 'agentbase:all'; state.record = ''; state.panel = ''; refresh(); });
   const reload = el('button', '', 'Refresh'); reload.addEventListener('click', () => { menu.hidden = true; refresh(); });
-  menu.replaceChildren(reload, choose);
+  const pause = el('button', '', state.paused ? 'Resume updates' : 'Pause updates');
+  pause.addEventListener('click', () => { menu.hidden = true; state.paused = !state.paused; if (!state.paused) refresh(); else render(); });
+  menu.replaceChildren(pause, reload, choose);
 });
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    if (!$('template-picker').hidden) $('template-picker').hidden = true;
+    else if (!$('menu').hidden) $('menu').hidden = true;
+    else if (!$('settings-panel').hidden) $('settings-panel').hidden = true;
+    else if (!$('search-results').hidden) $('search-results').hidden = true;
+    else if (state.panel) { state.panel = ''; state.record = ''; state.detailExpanded = false; refresh(); }
+  }
+  if (event.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+    event.preventDefault(); $('search').focus();
+  }
+});
+document.addEventListener('pointerdown', event => {
+  if (event.target === $('template-picker')) $('template-picker').hidden = true;
+  if (state.panel && !event.target.closest('#detail,.task-card,.graph-hit,#history,#connections')) {
+    state.panel = ''; state.record = ''; state.detailExpanded = false; renderPanel(state.snapshot);
+  }
+  if (!$('menu').hidden && !event.target.closest('#menu,#more')) $('menu').hidden = true;
+  if (!$('settings-panel').hidden && !event.target.closest('#settings-panel,#graph-settings')) $('settings-panel').hidden = true;
+  if (!$('search-results').hidden && !event.target.closest('#search-results,#search')) $('search-results').hidden = true;
+});
+window.agentbase.skillTemplates().then(templates => { state.skillTemplates = Array.isArray(templates) ? templates : []; }).catch(() => { state.skillTemplates = []; });
 refresh();
-setInterval(() => { if (!document.hidden && !state.skillEditing) refresh(); }, 8000);
+setInterval(() => { if (!document.hidden && !state.paused && !state.skillEditing && !state.memoryBusy && !(state.panel === 'record' && state.memoryDraft?.id === state.record)) refresh(); }, 8000);

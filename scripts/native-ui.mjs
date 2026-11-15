@@ -13,6 +13,7 @@ if (existsSync(join(root, 'src'))) execFileSync('npm', ['run', 'build'], { cwd: 
 await mkdir(join(contents, 'MacOS'), { recursive: true });
 await mkdir(join(resources, 'bridge'), { recursive: true });
 await cp(join(root, 'assets', 'logo.png'), join(resources, 'AgentBaseLogo.png'));
+await cp(join(root, 'assets', 'skill-templates.json'), join(resources, 'SkillTemplates.json'));
 for (const file of ['inspector-main.js', 'inspector.js', 'operations.js', 'graph.js', 'skills.js', 'version.js', 'connections.js', 'connections-main.js']) await cp(join(root, 'dist', file), join(resources, 'bridge', file));
 await writeFile(join(resources, 'bridge', 'package.json'), '{"type":"module"}\n');
 const iconTemporary = await mkdtemp(join(tmpdir(), 'agentbase-icon-'));

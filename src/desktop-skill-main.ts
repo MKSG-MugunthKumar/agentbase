@@ -17,13 +17,24 @@ const form = JSON.parse(input);
 const title = String(form.title ?? '').trim().slice(0, 120);
 const description = String(form.description ?? '').trim().slice(0, 1000);
 const instructions = String(form.instructions ?? '').trim().slice(0, 10_000);
-if (!title || !description || !instructions) throw new Error('Title, description, and instructions are required.');
+const editing = typeof form.id === 'string' && form.id.startsWith('skill_');
+if (!title || !description || (!editing && !instructions)) throw new Error('Title, description, and instructions are required.');
 const category = ['General', 'Coding', 'Research', 'Data', 'Planning', 'Writing'].includes(form.category) ? form.category : 'General';
-const triggers = String(form.triggers ?? '').split(/\r?\n/u).map((line: string) => line.trim()).filter(Boolean).slice(0, 50);
+const lines = (value: unknown) => String(value ?? '').split(/\r?\n/u).map((line: string) => line.trim()).filter(Boolean).slice(0, 50);
+const triggers = lines(form.triggers), tags = lines(form.tags), appliesTo = lines(form.applies_to);
 const store = new Store(home);
 let directory: string | undefined;
 try {
   const project = store.project(String(form.project_id ?? ''));
+  if (editing) {
+    const result = await new Agentbase(store).call('skill_save', {
+      project_id: project.id, actor: 'agentbase-desktop', request_id: randomUUID(),
+      id: form.id, expected_version: Number(form.expected_version), title, description, triggers, tags,
+      applies_to: appliesTo, source: String(form.source ?? '').trim(), category,
+      status: form.status === 'disabled' ? 'disabled' : 'active',
+    });
+    console.log(JSON.stringify({ ok: true, id: result.id }));
+  } else {
   const root = String(project.root);
   const base = title.toLocaleLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/gu, '-').replace(/^-|-$/gu, '').slice(0, 60) || 'custom-skill';
   const parent = join(root, '.agents', 'skills');
@@ -39,9 +50,10 @@ try {
   await writeFile(file, `---\nname: ${directory.split(/[\\/]/u).at(-1)}\ndescription: >-\n  ${summary}\n---\n\n${instructions}\n`);
   const result = await new Agentbase(store).call('skill_save', {
     project_id: project.id, actor: 'agentbase-desktop', request_id: randomUUID(), title, description,
-    triggers, tags: [], applies_to: [], source: pathToFileURL(file).href, category, status: 'active',
+    triggers, tags, applies_to: appliesTo, source: pathToFileURL(file).href, category, status: 'active',
   });
   console.log(JSON.stringify({ ok: true, id: result.id }));
+  }
 } catch (error) {
   if (directory) await rm(directory, { recursive: true, force: true });
   console.log(JSON.stringify({ ok: false, error: (error as Error).message }));

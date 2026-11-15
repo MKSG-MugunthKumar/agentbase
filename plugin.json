@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "agentbase",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "Local project storage and memory, tasks, handoffs, and DuckDB data analysis for AI agents.",
   "extensions": {
     "com.openai": {
