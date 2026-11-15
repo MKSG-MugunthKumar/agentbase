@@ -1,0 +1,32 @@
+name: Windows release bundles
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows-desktop, main]
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install AgentBase dependencies
+        run: npm ci
+      - name: Install desktop dependencies
+        run: npm ci --prefix desktop
+      - name: Check desktop skill creation
+        run: |
+          npm run build
+          node --test test/desktop-skill.test.mjs
+      - name: Build Windows bundles
+        run: npm run build:windows --prefix desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentbase-windows-bundles
+          path: |
+            build/windows/*.appx
+            build/windows/*.zip
+          if-no-files-found: error

@@ -153,7 +153,7 @@ export function inspectorSnapshot(home: string, projectId?: string, recordId?: s
       for (const [key, value] of Object.entries(aggregate ?? {})) taskSummary[key] = Number(value ?? 0);
       for (const row of db.prepare("SELECT kind,COUNT(*) AS n FROM records WHERE project_id=? GROUP BY kind").all(selected.id!)) counts[String(row.kind)] = Number(row.n);
       // Bound each kind independently so large task histories never hide memories or handoffs.
-      for (const kind of ['task', 'plan', 'checkpoint', 'memory', 'decision', 'session', 'dataset', 'analysis']) {
+      for (const kind of ['task', 'plan', 'checkpoint', 'memory', 'decision', 'session', 'dataset', 'analysis', 'skill']) {
         const rows = db.prepare('SELECT * FROM records WHERE project_id=? AND kind=? ORDER BY updated_at DESC,rowid DESC LIMIT ?').all(selected.id!, kind, kind === 'task' ? taskLimit : 200);
         omitted += Math.max(0, (counts[kind] ?? 0) - rows.length);
         for (const row of rows) {

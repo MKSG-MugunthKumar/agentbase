@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'">
+  <title>AgentBase</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="renderer.js" defer></script>
+</head>
+<body>
+  <div class="window-drag" aria-hidden="true"></div>
+  <header class="toolbar">
+    <select id="project" aria-label="Project"></select>
+    <nav class="segmented" aria-label="View">
+      <button class="tab active" data-view="graph">Graph</button>
+      <button class="tab" data-view="tasks">Tasks</button>
+      <button class="tab" data-view="skills">Skills</button>
+    </nav>
+    <div class="toolbar-icons">
+      <button id="history" class="icon-button" title="Recent changes" aria-label="Recent changes">◴</button>
+      <button id="connections" class="icon-button" title="Connections" aria-label="Connections">♧</button>
+    </div>
+    <div class="toolbar-fill"></div>
+    <div id="task-filter" class="task-filter" hidden><label for="status">Status</label><select id="status"><option>All</option><option>Open</option><option>Needs attention</option><option>Done</option></select></div>
+    <div id="search-wrap" class="search-wrap"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search all projects" aria-label="Search project records"></div>
+    <button id="refresh" class="icon-button" title="Refresh" aria-label="Refresh">↻</button>
+    <button id="new-skill" class="new-skill" title="New skill" disabled hidden>＋ New skill</button>
+    <button id="more" class="more-button" title="More options" aria-label="More options">···⌄</button>
+  </header>
+  <button id="graph-settings" class="graph-settings" title="Graph settings" aria-label="Graph settings">☷</button>
+  <main id="content"></main>
+  <div id="notice" role="status"></div>
+  <footer class="footer"><img src="assets/logo.png" alt="AgentBase logo"><span id="graph-count"></span></footer>
+  <button id="fit" class="fit-button" title="Fit graph" aria-label="Fit graph">⤡</button>
+  <aside id="detail" class="detail" aria-label="Selected item" hidden></aside>
+  <div id="menu" class="menu" hidden></div>
+</body>
+</html>

@@ -27,7 +27,7 @@ test('real stdio MCP exposes tools, validates input, and survives errors across 
   const readOnly = new Set(['mcp_status', 'graph_get', 'backup_verify', 'project_list', 'record_get', 'search', 'task_list',
     'handoff_get', 'context_get', 'dataset_inspect', 'project_export', 'skill_list', 'skill_recommend']);
   const destructive = new Set(['project_attach', 'knowledge_save', 'graph_link', 'skill_save', 'plan_save', 'plan_tasks_create', 'task_update', 'task_claim',
-    'task_complete', 'memory_record', 'memory_update', 'checkpoint_save']);
+    'task_complete', 'memory_record', 'memory_update', 'memory_review', 'checkpoint_save']);
   for (const tool of tools.tools) {
     assert.deepEqual(tool.annotations, toolAnnotations(tool.name));
     assert.equal(tool.annotations.readOnlyHint, readOnly.has(tool.name), `${tool.name} read-only hint must match behavior`);
