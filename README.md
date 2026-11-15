@@ -1,8 +1,14 @@
 # AgentBase
 
-**Local project memory for coding agents.** AgentBase keeps tasks, decisions, sources, and handoffs in a project database. Codex and Claude Code access it through MCP; the desktop app shows the graph, task board, and skills.
+**Open-source, local project memory for coding agents.** AgentBase keeps tasks, decisions, sources, and handoffs in a project database. Codex and Claude Code access it through MCP; the desktop app shows the graph, task board, and skills.
 
 ![AgentBase Graph and Tasks views](docs/screenshots/showcase.gif)
+
+## What can you ask?
+
+![Example questions you can ask AgentBase about project work](docs/agentbase-question-guide.png)
+
+See [more example questions](Questions.md).
 
 ## Download
 
