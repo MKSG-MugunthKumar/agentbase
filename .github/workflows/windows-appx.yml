@@ -23,6 +23,21 @@ jobs:
           node --test test/desktop-skill.test.mjs
       - name: Build Windows bundles
         run: npm run build:windows --prefix desktop
+      - name: Capture Windows Store screenshot
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $env:AGENTBASE_HOME = Join-Path $env:RUNNER_TEMP 'agentbase-screenshot-store'
+          $env:AGENTBASE_SCREENSHOT_PATH = Join-Path $env:RUNNER_TEMP 'agentbase-windows-store.png'
+          node scripts/seed-store-screenshot.mjs $env:AGENTBASE_HOME
+          & .\desktop\node_modules\.bin\electron.cmd .\desktop\capture-store.mjs
+          if (-not (Test-Path $env:AGENTBASE_SCREENSHOT_PATH)) { throw 'Screenshot was not created.' }
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: agentbase-windows-store-screenshot
+          path: ${{ runner.temp }}/agentbase-windows-store.png
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: agentbase-windows-bundles
