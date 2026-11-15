@@ -1,6 +1,6 @@
 {
   "name": "agentbase",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "Local project storage and memory, evidence-backed tasks, handoffs, and DuckDB data analysis for AI agents.",
   "type": "module",
   "license": "Apache-2.0",
