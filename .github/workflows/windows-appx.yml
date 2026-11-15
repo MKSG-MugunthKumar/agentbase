@@ -1,9 +1,9 @@
-name: Windows Store package
+name: Windows release bundles
 
 on:
   workflow_dispatch:
   push:
-    branches: [windows-desktop]
+    branches: [windows-desktop, main]
 
 jobs:
   package:
@@ -21,10 +21,12 @@ jobs:
         run: |
           npm run build
           node --test test/desktop-skill.test.mjs
-      - name: Build Windows Store package
+      - name: Build Windows bundles
         run: npm run build:windows --prefix desktop
       - uses: actions/upload-artifact@v4
         with:
-          name: agentbase-windows-appx
-          path: build/windows/*.appx
+          name: agentbase-windows-bundles
+          path: |
+            build/windows/*.appx
+            build/windows/*.zip
           if-no-files-found: error

@@ -1,22 +1,44 @@
 {
   "name": "agentbase-desktop",
   "private": true,
-  "version": "0.7.5",
+  "version": "0.7.6",
   "type": "module",
   "main": "main.mjs",
   "scripts": {
     "start": "electron .",
     "stage": "node ../scripts/stage-windows.mjs",
-    "build:windows": "npm run stage && electron-builder --win appx --x64"
+    "build:windows": "npm run stage && electron-builder --win appx zip --x64"
   },
   "build": {
     "appId": "dev.agentbase.inspector",
     "productName": "AgentBase",
-    "files": ["main.mjs", "preload.cjs", "index.html", "renderer.js", "style.css", "assets/**"],
-    "extraResources": [{ "from": "build-resources/package", "to": "package" }],
-    "directories": { "output": "../build/windows", "buildResources": "assets" },
-    "toolsets": { "winCodeSign": "1.1.0" },
-    "win": { "target": ["appx"], "icon": "assets/app-icon.png" },
+    "files": [
+      "main.mjs",
+      "preload.cjs",
+      "index.html",
+      "renderer.js",
+      "style.css",
+      "assets/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build-resources/package",
+        "to": "package"
+      }
+    ],
+    "directories": {
+      "output": "../build/windows",
+      "buildResources": "assets"
+    },
+    "toolsets": {
+      "winCodeSign": "1.1.0"
+    },
+    "win": {
+      "target": [
+        "appx"
+      ],
+      "icon": "assets/app-icon.png"
+    },
     "appx": {
       "applicationId": "AgentBase",
       "identityName": "Duncanai.AgentBase",
