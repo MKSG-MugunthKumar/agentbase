@@ -20,9 +20,20 @@ jobs:
       - name: Check shared desktop behavior
         run: |
           npm run build
-          node --test test/desktop-skill.test.mjs test/desktop-view-model.test.mjs test/desktop-connection-actions.test.mjs test/desktop-memory-actions.test.mjs test/desktop-analysis-view.test.mjs
+          node --test test/desktop-skill.test.mjs test/desktop-view-model.test.mjs test/desktop-connection-actions.test.mjs test/desktop-memory-actions.test.mjs test/desktop-analysis-view.test.mjs test/desktop-ai-judge.test.mjs
       - name: Build Windows bundles
         run: npm run build:windows --prefix desktop
+      - name: Verify bundled Windows runtime
+        shell: pwsh
+        run: |
+          $package = Join-Path $PWD 'build/windows/win-unpacked/resources/package'
+          Push-Location $package
+          try {
+            & ./runtime/node.exe ./bin/agentbase.mjs tools project_list | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Bundled AgentBase CLI failed.' }
+            & ./runtime/node.exe --input-type=module -e "import('@duckdb/node-api')"
+            if ($LASTEXITCODE -ne 0) { throw 'Bundled DuckDB binding failed.' }
+          } finally { Pop-Location }
       - name: Capture Windows Store screenshot
         if: github.event_name == 'workflow_dispatch'
         shell: pwsh

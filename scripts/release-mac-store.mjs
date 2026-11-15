@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,15 +23,12 @@ const sign = (target, entitlements) => {
 
 await mkdir(storeDir, { recursive: true });
 await rm(app, { recursive: true, force: true });
-await cp(source, app, { recursive: true });
+execFileSync('ditto', [source, app], { stdio: 'inherit' });
 const resources = join(app, 'Contents', 'Resources');
 const packageDir = join(resources, 'package');
 const binaryDir = join(packageDir, 'node_modules', '@duckdb', 'node-bindings-darwin-arm64');
 await rm(join(resources, 'Distribution.txt'), { force: true });
 if (profile) await cp(profile, join(app, 'Contents', 'embedded.provisionprofile'));
-await writeFile(join(resources, 'runtime.json'), JSON.stringify({
-  node: 'package/runtime/node', source: 'package', codex: 'codex', claude: 'claude', autoInstall: 'false', store: 'true'
-}) + '\n');
 for (const binary of [join(binaryDir, 'libduckdb.dylib'), join(binaryDir, 'duckdb.node')]) sign(binary);
 sign(join(packageDir, 'runtime', 'node'), 'mac-store-helper.entitlements');
 sign(app, 'mac-store-app.entitlements');

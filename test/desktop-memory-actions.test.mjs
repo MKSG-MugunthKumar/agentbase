@@ -18,4 +18,8 @@ test('desktop memory bridge allows only scoped versioned review actions', () => 
   assert.equal(edit.tool, 'memory_review');
   assert.equal(edit.payload.valid_from, null);
   assert.equal(edit.payload.reason, 'Corrected in inspector.');
+  const supersede = prepareMemoryAction({ ...base, action: 'supersede', kind: 'fact', title: 'New', content: 'Revised evidence', source: 'Review', epistemic_status: 'observed', scope: 'project', valid_from: '', valid_until: '' });
+  assert.equal(supersede.tool, 'memory_record');
+  assert.equal(supersede.payload.supersedes, base.id);
+  assert.equal('expected_version' in supersede.payload, false);
 });

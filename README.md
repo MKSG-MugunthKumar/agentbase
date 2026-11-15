@@ -47,6 +47,6 @@ Project data stays local. AgentBase has no hosted project-data service or silent
 
 Issues and pull requests are welcome. See [contributing](CONTRIBUTING.md) for setup and checks. AgentBase is licensed under [Apache 2.0](LICENSE).
 
-The shared desktop renderer in `desktop/` runs on Windows and macOS. After `npm ci` and `npm ci --prefix desktop`, use `npm run ui:shared` to inspect it locally. `npm run build:mac --prefix desktop` and `npm run build:windows --prefix desktop` package that same renderer on their respective platforms. The existing macOS installer still uses the native SwiftUI inspector while the shared renderer gains feature parity.
+The desktop renderer in `desktop/` runs on Windows and macOS. After `npm ci` and `npm ci --prefix desktop`, use `npm run ui` to run it locally. `npm run build:mac --prefix desktop` and `npm run build:windows --prefix desktop` package the same renderer. `npm run release:mac` builds the macOS installer from that shared app. The earlier SwiftUI inspector remains available to contributors with `npm run ui:native`.
 
 On macOS, `npm run build:windows-zip:cross --prefix desktop` creates an unsigned Windows x64 ZIP in `build/windows-cross/` using the matching Windows Node.js runtime. GitHub Actions also builds the Windows ZIP and Appx on a Windows runner after a push to `main` or `windows-desktop`.

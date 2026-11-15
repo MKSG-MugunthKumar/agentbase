@@ -19,6 +19,8 @@
       "connection-actions.mjs",
       "memory-actions.mjs",
       "analysis-view.mjs",
+      "ai-judge.mjs",
+      "ai-service.mjs",
       "preload.cjs",
       "index.html",
       "renderer.js",
@@ -29,7 +31,13 @@
     "extraResources": [
       {
         "from": "build-resources/package",
-        "to": "package"
+        "to": "package",
+        "filter": ["**/*", "!node_modules/**"]
+      },
+      {
+        "from": "build-resources/package/node_modules",
+        "to": "package/node_modules",
+        "filter": ["**/*"]
       }
     ],
     "directories": {

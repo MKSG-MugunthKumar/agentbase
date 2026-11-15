@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron';
 import { execFile, spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { readFile } from 'node:fs/promises';
 import { allowedConnectionAction } from './connection-actions.mjs';
 import { prepareMemoryAction } from './memory-actions.mjs';
+import { createAIService } from './ai-service.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const packaged = app.isPackaged;
@@ -70,11 +71,9 @@ function skillInstructions(project, skill) {
   });
 }
 
-function memoryAction(input) {
-  const command = prepareMemoryAction(input);
-  if (!command) return Promise.resolve({ ok: false, error: 'Invalid memory action.' });
+function callTool(tool, payload) {
   return new Promise((finish) => {
-    const child = spawn(node, [join(source, 'bin', 'agentbase.mjs'), '--home', home, 'call', command.tool, '-'], { cwd: source, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(node, [join(source, 'bin', 'agentbase.mjs'), '--home', home, 'call', tool, '-'], { cwd: source, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', settled = false;
     const done = value => { if (settled) return; settled = true; clearTimeout(timer); finish(value); };
     const timer = setTimeout(() => { child.kill(); done({ ok: false, error: 'Memory action timed out.' }); }, 20000);
@@ -88,11 +87,18 @@ function memoryAction(input) {
       catch { done({ ok: false, error: 'AgentBase returned an invalid memory result.' }); }
     });
     child.stdin.on('error', () => {});
-    child.stdin.end(JSON.stringify(command.payload));
+    child.stdin.end(JSON.stringify(payload));
   });
 }
 
+function memoryAction(input) {
+  const command = prepareMemoryAction(input);
+  return command ? callTool(command.tool, command.payload) : Promise.resolve({ ok: false, error: 'Invalid memory action.' });
+}
+
 app.whenReady().then(() => {
+  const ai = createAIService({ app, safeStorage, runTool: callTool });
+  const aiResult = action => action.catch(error => ({ ok: false, error: error.message }));
   ipcMain.handle('snapshot', (_event, input = {}) => {
     const bounded = (value, max) => typeof value === 'string' ? value.slice(0, max) : '';
     const taskLimit = Number.isInteger(input.taskLimit) ? Math.min(1000, Math.max(200, input.taskLimit)) : 200;
@@ -109,6 +115,11 @@ app.whenReady().then(() => {
   ipcMain.handle('connection-action', (_event, input = {}) => connectionAction(input?.host, input?.action));
   ipcMain.handle('skill-instructions', (_event, input = {}) => skillInstructions(input?.project, input?.skill));
   ipcMain.handle('memory-action', (_event, input = {}) => memoryAction(input));
+  ipcMain.handle('ai-status', () => aiResult(ai.status()));
+  ipcMain.handle('ai-save', (_event, input = {}) => aiResult(ai.save(input)));
+  ipcMain.handle('ai-forget', () => aiResult(ai.forget()));
+  ipcMain.handle('ai-judge', (_event, input = {}) => aiResult(ai.judge(input)));
+  ipcMain.handle('ai-save-to-task', (_event, input = {}) => aiResult(ai.saveToTask(input)));
   ipcMain.handle('skill-templates', async () => JSON.parse(await readFile(join(source, 'assets', 'skill-templates.json'), 'utf8')));
   const window = new BrowserWindow({
     width: 1360, height: 900, minWidth: 900, minHeight: 620,

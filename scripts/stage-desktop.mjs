@@ -22,6 +22,20 @@ try {
   const archive = packed.stdout.trim().split(/\r?\n/u).at(-1);
   if (!archive?.endsWith('.tgz')) throw new Error('npm pack did not produce an archive.');
   execFileSync('tar', ['-xzf', join(scratch, archive), '-C', stageRoot], { stdio: 'inherit' });
+  if (target === 'win32' && process.platform !== 'win32') {
+    const bindings = join(stage, 'node_modules', '@duckdb');
+    const manifest = JSON.parse(await readFile(join(bindings, 'node-bindings', 'package.json'), 'utf8'));
+    const version = manifest.optionalDependencies?.['@duckdb/node-bindings-win32-x64'];
+    if (!version) throw new Error('DuckDB Windows x64 binding version is unavailable.');
+    const packedBinding = spawnSync('npm', ['pack', `@duckdb/node-bindings-win32-x64@${version}`, '--pack-destination', scratch, '--silent'], { cwd: root, encoding: 'utf8' });
+    if (packedBinding.status !== 0) throw new Error(`Could not retrieve Windows DuckDB binding: ${packedBinding.stderr || packedBinding.error?.message || packedBinding.status}`);
+    const bindingArchive = packedBinding.stdout.trim().split(/\r?\n/u).at(-1);
+    const unpack = join(scratch, 'binding');
+    await mkdir(unpack);
+    execFileSync('tar', ['-xzf', join(scratch, bindingArchive), '-C', unpack], { stdio: 'inherit' });
+    await cp(join(unpack, 'package'), join(bindings, 'node-bindings-win32-x64'), { recursive: true });
+    await rm(join(bindings, `node-bindings-darwin-${process.arch}`), { recursive: true, force: true });
+  }
   await mkdir(join(stage, 'runtime'), { recursive: true });
   const runtimeName = target === 'win32' ? 'node.exe' : 'node';
   if (target === process.platform) await cp(process.execPath, join(stage, 'runtime', runtimeName));

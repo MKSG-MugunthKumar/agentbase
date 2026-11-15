@@ -1,8 +1,10 @@
 import { taskGroup, taskSummary, visibleGraph, memoryComparisons } from './view-model.mjs';
 import { analysisData, analysisDefaultAxes, analysisPoints } from './analysis-view.mjs';
+import { attentionCriteria, defaultEndpoint, generalCriteria, taskJudgeContext } from './ai-judge.mjs';
 
 const $ = id => document.getElementById(id);
 const state = { view: 'graph', project: 'agentbase:all', record: '', recordHistory: [], historyIndex: -1, detailExpanded: false, skill: '', skillEditing: false, editingSkill: '', newTemplate: null, skillTemplates: [], templateCategory: 'General', taskLimit: 200, search: '', skillSearch: '', skillCategory: 'All', statusFilter: 'All', paused: false, memoryDraft: null, memoryBusy: false, memoryMessage: '', includeBackground: false, hiddenKinds: new Set(['session']), orphans: true, localGraph: false, localDepth: 1, colorMode: 'none', labels: true, arrows: false, nodeSize: 1, linkWidth: 1, centerForce: .12, repelForce: 2200, linkForce: .015, linkDistance: 1, snapshot: null, loading: false, queued: false, panel: '', connectionStatus: null, connectionLoading: false, connectionActionBusy: false, connectionMessage: '', connectionRequest: 0, zoom: 1, panX: 0, panY: 0 };
+const aiState = { provider: 'OpenAI-compatible', endpoint: defaultEndpoint('OpenAI-compatible'), model: '', apiKey: '', hasKey: false, profile: 'General', criteria: generalCriteria, reference: '', submission: '', result: '', message: '', busy: false, loaded: false };
 
 function el(tag, cls, value) {
   const node = document.createElement(tag);
@@ -157,10 +159,11 @@ function renderMemoryActions(body, record) {
     state.memoryBusy = true; state.memoryMessage = '';
     section.querySelectorAll('button').forEach(button => { button.disabled = true; });
     try {
-      const result = await window.agentbase.memoryAction({ project_id: record.project_id, id: record.id, expected_version: record.version, action, ...draft });
+      const result = await window.agentbase.memoryAction({ project_id: record.project_id, id: record.id, expected_version: record.version, action, kind: record.body?.type || (record.kind === 'decision' ? 'decision' : 'fact'), epistemic_status: record.body?.epistemic_status, scope: record.body?.scope || 'project', task_id: record.body?.task_id, ...draft });
       if (!result.ok) { state.memoryMessage = result.error || 'Could not save memory.'; return; }
       state.memoryMessage = 'Saved.';
       if (action === 'forgotten' || action === 'reject') { state.panel = ''; state.record = ''; }
+      if (action === 'supersede' && result.record?.id) { state.record = result.record.id; state.memoryDraft = null; }
       await refresh();
     } catch (error) { state.memoryMessage = error.message; }
     finally { state.memoryBusy = false; if (state.snapshot) renderPanel(state.snapshot); }
@@ -172,7 +175,7 @@ function renderMemoryActions(body, record) {
   section.append(action('Approve memory', 'approve'));
   field('Title', 'title'); field('Content', 'content', true); field('Source', 'source');
   field('Valid from · YYYY-MM-DD', 'valid_from'); field('Valid until · YYYY-MM-DD', 'valid_until');
-  section.append(action('Save correction', 'edit'));
+  const correction = el('div', 'memory-action-row'); correction.append(action('Save correction', 'edit'), action('Supersede', 'supersede')); section.append(correction);
   field('Reason for rejection, stale, disputed, or forgetting', 'reason');
   const row = el('div', 'memory-action-row');
   for (const [label, name] of [['Reject', 'reject'], ['Mark stale', 'stale'], ['Dispute', 'disputed'], ['Forget', 'forgotten']]) row.append(action(label, name));
@@ -602,6 +605,92 @@ function renderAnalysisWorkspace(target, record) {
   target.append(el('p', data.truncated || data.omitted ? 'analysis-note warning' : 'analysis-note', `${data.rows.length} saved rows loaded${data.omitted ? ` · ${data.omitted} more saved rows outside this view` : ''}${data.truncated ? ' · Query result was truncated when saved' : ''}`));
 }
 
+async function loadAIStatus() {
+  try {
+    const result = await window.agentbase.aiStatus();
+    if (result.ok) Object.assign(aiState, { provider: result.provider, endpoint: result.endpoint, model: result.model, hasKey: result.hasKey, loaded: true });
+    else aiState.message = result.error || 'AI settings unavailable.';
+  } catch (error) { aiState.message = error.message; }
+  if (state.panel === 'connections' && state.snapshot) renderPanel(state.snapshot);
+}
+
+function renderAIDialog() {
+  const overlay = $('ai-dialog'); overlay.hidden = false;
+  const selectedTask = state.snapshot?.records?.find(record => record.id === state.record && record.kind === 'task');
+  const dialog = el('div', 'ai-dialog-content');
+  const head = el('div', 'ai-dialog-head'); head.append(el('h2', '', 'Your AI'));
+  const close = el('button', '', '×'); close.setAttribute('aria-label', 'Close AI setup'); close.addEventListener('click', () => { overlay.hidden = true; }); head.append(close); dialog.append(head);
+  const field = (label, key, tag = 'input', attrs = {}) => {
+    const wrap = el('label', `ai-field${key === 'submission' ? ' ai-submission' : ''}`); wrap.append(el('span', '', label));
+    const input = el(tag); input.value = aiState[key];
+    if (attrs.type) input.type = attrs.type;
+    if (attrs.maxLength) input.maxLength = attrs.maxLength;
+    input.disabled = aiState.busy || attrs.disabled;
+    input.addEventListener('input', () => { aiState[key] = input.value; });
+    wrap.append(input); dialog.append(wrap); return input;
+  };
+  const provider = el('label', 'ai-field'); provider.append(el('span', '', 'Provider'));
+  const providerSelect = el('select');
+  for (const name of ['OpenAI-compatible', 'Jev']) { const option = el('option', '', name === 'Jev' ? 'Jev · TypeSafe' : name); option.value = name; providerSelect.append(option); }
+  providerSelect.value = aiState.provider; providerSelect.disabled = aiState.busy;
+  providerSelect.addEventListener('change', () => { aiState.provider = providerSelect.value; aiState.endpoint = defaultEndpoint(aiState.provider); aiState.model = aiState.provider === 'Jev' ? 'jev-latest' : ''; aiState.hasKey = false; aiState.result = ''; renderAIDialog(); });
+  provider.append(providerSelect); dialog.append(provider);
+  field(aiState.provider === 'Jev' ? 'System One API URL' : 'Chat completions URL', 'endpoint', 'input', { disabled: aiState.provider === 'Jev' });
+  field('Model', 'model', 'input', { maxLength: 150 });
+  field('API key (saved securely on this computer)', 'apiKey', 'input', { type: 'password', maxLength: 8000 });
+  const actions = el('div', 'ai-actions');
+  const save = el('button', '', 'Save setup'); save.disabled = aiState.busy;
+  save.addEventListener('click', async () => {
+    aiState.busy = true; aiState.message = 'Saving…'; renderAIDialog();
+    try {
+      const result = await window.agentbase.aiSave({ provider: aiState.provider, endpoint: aiState.endpoint, model: aiState.model, apiKey: aiState.apiKey });
+      aiState.message = result.ok ? 'Setup saved.' : result.error || 'Could not save setup.';
+      if (result.ok) { aiState.hasKey = result.hasKey; aiState.apiKey = ''; }
+    } catch (error) { aiState.message = error.message; }
+    finally { aiState.busy = false; renderAIDialog(); if (state.panel === 'connections') renderPanel(state.snapshot); }
+  }); actions.append(save);
+  const forget = el('button', '', 'Forget setup'); forget.disabled = aiState.busy || !aiState.hasKey;
+  forget.addEventListener('click', async () => { aiState.busy = true; renderAIDialog(); try { const result = await window.agentbase.aiForget(); if (result.ok) Object.assign(aiState, { provider: result.provider, endpoint: result.endpoint, model: '', apiKey: '', hasKey: false, result: '' }); aiState.message = result.ok ? 'Setup removed.' : result.error; } catch (error) { aiState.message = error.message; } finally { aiState.busy = false; renderAIDialog(); } }); actions.append(forget);
+  dialog.append(actions);
+  const section = el('div', 'ai-separator'); dialog.append(section);
+  if (selectedTask) {
+    const row = el('div', 'ai-task-row'); row.append(el('span', '', `Task · ${titleOf(selectedTask)}`));
+    const load = el('button', '', 'Load task context'); load.disabled = aiState.busy;
+    load.addEventListener('click', () => { Object.assign(aiState, taskJudgeContext(selectedTask, taskGroup(selectedTask) === 'Needs attention'), { result: '', message: '' }); renderAIDialog(); }); row.append(load); dialog.append(row);
+  }
+  const profile = el('label', 'ai-field'); profile.append(el('span', '', 'Review profile'));
+  const profileSelect = el('select');
+  for (const name of ['General', 'Needs attention']) { const option = el('option', '', name); option.value = name; profileSelect.append(option); }
+  profileSelect.value = aiState.profile; profileSelect.disabled = aiState.busy;
+  profileSelect.addEventListener('change', () => { aiState.profile = profileSelect.value; aiState.criteria = aiState.profile === 'Needs attention' ? attentionCriteria : generalCriteria; aiState.result = ''; renderAIDialog(); });
+  profile.append(profileSelect); dialog.append(profile);
+  field('Criteria', 'criteria', 'textarea', { maxLength: 2000 });
+  field('Reference context · optional', 'reference', 'textarea', { maxLength: 15000 });
+  field('Submission', 'submission', 'textarea', { maxLength: 30000 });
+  dialog.append(el('p', 'ai-note', `Judge sends these fields to ${aiState.model || 'your model'}. The result is an AI assessment, not an AgentBase-verified score.`));
+  if (aiState.result) dialog.append(el('pre', 'ai-result', aiState.result));
+  if (aiState.message) dialog.append(el('p', 'ai-message', aiState.message));
+  const judgeRow = el('div', 'ai-actions');
+  if (selectedTask && aiState.result) {
+    const store = el('button', '', 'Save to task'); store.disabled = aiState.busy;
+    store.addEventListener('click', async () => { aiState.busy = true; aiState.message = 'Saving to task knowledge…'; renderAIDialog(); try { const result = await window.agentbase.aiSaveToTask({ project_id: selectedTask.project_id, task_id: selectedTask.id, task_title: titleOf(selectedTask), profile: aiState.profile, criteria: aiState.criteria, reference: aiState.reference, submission: aiState.submission, result: aiState.result }); aiState.message = result.ok ? `Saved to task knowledge · ${result.record?.id || ''}` : result.error || 'Could not save assessment.'; if (result.ok) refresh(); } catch (error) { aiState.message = error.message; } finally { aiState.busy = false; renderAIDialog(); } }); judgeRow.append(store);
+  }
+  const judge = el('button', 'ai-judge-button', aiState.busy ? 'Judging…' : 'Judge'); judge.disabled = aiState.busy || !aiState.submission.trim();
+  judge.addEventListener('click', async () => {
+    aiState.busy = true; aiState.message = 'Judging…'; aiState.result = ''; renderAIDialog();
+    try {
+      const setup = await window.agentbase.aiSave({ provider: aiState.provider, endpoint: aiState.endpoint, model: aiState.model, apiKey: aiState.apiKey });
+      if (!setup.ok) { aiState.message = setup.error; return; }
+      aiState.hasKey = setup.hasKey; aiState.apiKey = '';
+      const result = await window.agentbase.aiJudge({ profile: aiState.profile, criteria: aiState.criteria, reference: aiState.reference, submission: aiState.submission });
+      aiState.result = result.ok ? result.result : '';
+      aiState.message = result.ok ? '' : result.error || 'Assessment failed.';
+    } catch (error) { aiState.message = error.message; }
+    finally { aiState.busy = false; renderAIDialog(); }
+  }); judgeRow.append(judge); dialog.append(judgeRow);
+  overlay.replaceChildren(dialog);
+}
+
 function renderPanel(snapshot) {
   const panel = $('detail');
   if (!state.panel) { panel.hidden = true; return; }
@@ -795,6 +884,10 @@ function renderPanel(snapshot) {
     const check = el('button', 'detail-link', state.connectionLoading ? 'Checking…' : 'Refresh connections'); check.disabled = state.connectionLoading || state.connectionActionBusy; check.addEventListener('click', loadConnections); body.append(check);
     window.agentbase.storePath().then(path => { if (state.panel === 'connections') { const label = el('p', 'detail-body', `Data folder: ${path}`); body.append(label); } });
     const choose = el('button', 'task-card', 'Choose data folder…'); choose.addEventListener('click', async () => { await window.agentbase.chooseStore(); state.project = 'agentbase:all'; state.record = ''; state.panel = ''; state.connectionStatus = null; state.connectionRequest++; refresh(); }); body.append(choose);
+    const ai = el('div', 'connection-host');
+    const label = el('div', 'connection-identity'); label.append(el('strong', '', 'Your AI'), el('span', '', aiState.hasKey && aiState.model ? `Configured · ${aiState.model}` : 'OpenAI-compatible API'));
+    const setup = el('button', 'memory-action', 'Setup / Judge'); setup.addEventListener('click', renderAIDialog);
+    ai.append(label, setup); body.append(ai);
   }
   panel.replaceChildren(header, body);
 }
@@ -835,7 +928,7 @@ $('search').addEventListener('keydown', event => {
 });
 $('refresh').addEventListener('click', refresh);
 $('history').addEventListener('click', () => { state.panel = 'history'; renderPanel(state.snapshot); });
-$('connections').addEventListener('click', () => { state.panel = 'connections'; state.connectionMessage = ''; renderPanel(state.snapshot); loadConnections(); });
+$('connections').addEventListener('click', () => { state.panel = 'connections'; state.connectionMessage = ''; renderPanel(state.snapshot); loadConnections(); if (!aiState.loaded) loadAIStatus(); });
 $('fit').addEventListener('click', () => { state.zoom = 1; state.panX = 0; state.panY = 0; render(); });
 $('load-more').addEventListener('click', () => { state.taskLimit = Math.min(1000, state.taskLimit + 200); refresh(); });
 $('graph-settings').addEventListener('click', () => { $('settings-panel').hidden = !$('settings-panel').hidden; renderGraphSettings(state.snapshot); });
@@ -852,6 +945,7 @@ $('more').addEventListener('click', () => {
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     if (!$('template-picker').hidden) $('template-picker').hidden = true;
+    else if (!$('ai-dialog').hidden) $('ai-dialog').hidden = true;
     else if (!$('menu').hidden) $('menu').hidden = true;
     else if (!$('settings-panel').hidden) $('settings-panel').hidden = true;
     else if (!$('search-results').hidden) $('search-results').hidden = true;
@@ -863,6 +957,7 @@ document.addEventListener('keydown', event => {
 });
 document.addEventListener('pointerdown', event => {
   if (event.target === $('template-picker')) $('template-picker').hidden = true;
+  if (event.target === $('ai-dialog')) $('ai-dialog').hidden = true;
   if (state.panel && !event.target.closest('#detail,.task-card,.graph-hit,#history,#connections')) {
     state.panel = ''; state.record = ''; state.detailExpanded = false; renderPanel(state.snapshot);
   }

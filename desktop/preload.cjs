@@ -9,5 +9,10 @@ contextBridge.exposeInMainWorld('agentbase', {
   connectionAction: (input) => ipcRenderer.invoke('connection-action', input),
   skillInstructions: (input) => ipcRenderer.invoke('skill-instructions', input),
   memoryAction: (input) => ipcRenderer.invoke('memory-action', input),
+  aiStatus: () => ipcRenderer.invoke('ai-status'),
+  aiSave: (input) => ipcRenderer.invoke('ai-save', input),
+  aiForget: () => ipcRenderer.invoke('ai-forget'),
+  aiJudge: (input) => ipcRenderer.invoke('ai-judge', input),
+  aiSaveToTask: (input) => ipcRenderer.invoke('ai-save-to-task', input),
   skillTemplates: () => ipcRenderer.invoke('skill-templates'),
 });
