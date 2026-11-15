@@ -30,7 +30,10 @@ try {
   await cp(join(root, '.agents', 'plugins', 'marketplace.json'), join(bundledPackage, '.agents', 'plugins', 'marketplace.json'));
   await mkdir(join(bundledPackage, 'runtime'), { recursive: true });
   await cp(process.execPath, join(bundledPackage, 'runtime', 'node'));
-  await cp(join(dirname(dirname(process.execPath)), 'LICENSE'), join(bundledPackage, 'runtime', 'NODE-LICENSE'));
+  const nodeLicenseUrl = `https://raw.githubusercontent.com/nodejs/node/v${process.versions.node}/LICENSE`;
+  const nodeLicense = execFileSync('curl', ['--fail', '--show-error', '--location', '--max-time', '30', nodeLicenseUrl],
+    { encoding: 'utf8', maxBuffer: 2_000_000 });
+  await writeFile(join(bundledPackage, 'runtime', 'NODE-LICENSE'), nodeLicense);
   const mcp = JSON.parse(await readFile(join(bundledPackage, 'mcp.json'), 'utf8'));
   mcp.mcpServers.agentbase.command = './runtime/node';
   mcp.mcpServers.agentbase.args = ['./bin/agentbase.mjs', 'serve'];
