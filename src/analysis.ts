@@ -20,6 +20,9 @@ export async function sandboxCommand(node: string, worker: string, dataPaths: st
   if (process.platform === 'darwin') {
     const quoted = (s: string) => JSON.stringify(s);
     const reads = ['/System', '/usr/lib', '/usr/share', '/Library/Apple', '/private/var/db/dyld', runtime, await realpath(modules)];
+    // Homebrew's node links its runtime (libnode, libuv, openssl, icu, ...) from sibling kegs.
+    const homebrew = executable.match(/^(.+)\/Cellar\//)?.[1];
+    if (homebrew) reads.push(join(homebrew, 'Cellar'), join(homebrew, 'opt'));
     const profile = `(version 1)
       (deny default)
       (allow process-fork)
@@ -33,7 +36,7 @@ export async function sandboxCommand(node: string, worker: string, dataPaths: st
         ${[executable, fileURLToPath(new URL('../package.json', import.meta.url)), '/dev/null', '/dev/urandom', '/dev/random', ...dataPaths].map(p => `(literal ${quoted(p)})`).join(' ')})
       (allow file-write* (subpath ${quoted(scratch)}) (literal "/dev/null"))
       (allow file-read-data (subpath ${quoted(scratch)}))`;
-    return { command: '/usr/bin/sandbox-exec', args: ['-p', profile, executable, '--max-old-space-size=192', worker] };
+    return { command: '/usr/bin/sandbox-exec', args: ['-p', profile, executable, '--openssl-config=/dev/null', '--max-old-space-size=192', worker] };
   }
   if (process.platform === 'linux') {
     const bwrap = ['/usr/bin/bwrap', '/bin/bwrap'];
