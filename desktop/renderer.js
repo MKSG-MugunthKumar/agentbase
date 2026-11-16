@@ -3,7 +3,7 @@ import { analysisData, analysisDefaultAxes, analysisPoints } from './analysis-vi
 import { attentionCriteria, defaultEndpoint, generalCriteria, taskJudgeContext } from './ai-judge.mjs';
 
 const $ = id => document.getElementById(id);
-const state = { view: 'graph', project: 'agentbase:all', record: '', recordHistory: [], historyIndex: -1, detailExpanded: false, skill: '', skillEditing: false, editingSkill: '', newTemplate: null, skillTemplates: [], templateCategory: 'General', taskLimit: 200, search: '', skillSearch: '', skillCategory: 'All', statusFilter: 'All', paused: false, memoryDraft: null, memoryBusy: false, memoryMessage: '', includeBackground: false, hiddenKinds: new Set(['session']), orphans: true, localGraph: false, localDepth: 1, colorMode: 'none', labels: true, arrows: false, nodeSize: 1, linkWidth: 1, centerForce: .12, repelForce: 2200, linkForce: .015, linkDistance: 1, snapshot: null, loading: false, queued: false, panel: '', connectionStatus: null, connectionLoading: false, connectionActionBusy: false, connectionMessage: '', connectionRequest: 0, zoom: 1, panX: 0, panY: 0 };
+const state = { view: 'graph', project: 'agentbase:all', record: '', recordHistory: [], historyIndex: -1, detailExpanded: false, skill: '', skillEditing: false, editingSkill: '', newTemplate: null, skillTemplates: [], templateCategory: 'General', taskLimit: 200, search: '', skillSearch: '', skillCategory: 'All', statusFilter: 'All', paused: false, memoryDraft: null, memoryBusy: false, memoryMessage: '', includeBackground: false, hiddenKinds: new Set(['session']), orphans: true, localGraph: false, localDepth: 1, colorMode: 'type', labels: true, arrows: false, nodeSize: 1.8, linkWidth: 1, centerForce: .12, repelForce: 2200, linkForce: .015, linkDistance: 1, snapshot: null, loading: false, queued: false, panel: '', connectionStatus: null, connectionLoading: false, connectionActionBusy: false, connectionMessage: '', connectionRequest: 0, zoom: 1, panX: 0, panY: 0 };
 const aiState = { provider: 'OpenAI-compatible', endpoint: defaultEndpoint('OpenAI-compatible'), model: '', apiKey: '', hasKey: false, profile: 'General', criteria: generalCriteria, reference: '', submission: '', result: '', message: '', busy: false, loaded: false };
 
 function el(tag, cls, value) {
@@ -113,7 +113,7 @@ function renderGraphSettings(snapshot) {
   panel.append(settingRange('Link force', state.linkForce, 0, .06, .001, value => { state.linkForce = value; renderGraph(snapshot); }));
   panel.append(settingRange('Link distance', state.linkDistance, .4, 2.5, .1, value => { state.linkDistance = value; renderGraph(snapshot); }));
   const reset = el('button', 'setting-reset', 'Restore defaults');
-  reset.addEventListener('click', () => { state.hiddenKinds = new Set(['session']); state.orphans = true; state.localGraph = false; state.localDepth = 1; state.colorMode = 'none'; state.labels = true; state.arrows = false; state.nodeSize = 1; state.linkWidth = 1; state.centerForce = .12; state.repelForce = 2200; state.linkForce = .015; state.linkDistance = 1; state.includeBackground = false; refresh(); });
+  reset.addEventListener('click', () => { state.hiddenKinds = new Set(['session']); state.orphans = true; state.localGraph = false; state.localDepth = 1; state.colorMode = 'type'; state.labels = true; state.arrows = false; state.nodeSize = 1.8; state.linkWidth = 1; state.centerForce = .12; state.repelForce = 2200; state.linkForce = .015; state.linkDistance = 1; state.includeBackground = false; refresh(); });
   panel.append(reset);
 }
 function renderSearchResults(snapshot) {
@@ -333,7 +333,7 @@ function graphPositions(nodes, edges) {
   }
   return points;
 }
-function graphLabel(group, node, point) {
+function graphLabel(group, node, point, radius) {
   const words = String(node.title || node.kind).split(/\s+/u);
   const lines = []; let line = '';
   for (const word of words) {
@@ -341,9 +341,10 @@ function graphLabel(group, node, point) {
     else line += `${line ? ' ' : ''}${word}`;
   }
   if (line) lines.push(line);
-  const text = svgEl('text', { x: point.x + 15, y: point.y - Math.min(lines.length - 1, 1) * 7, class: 'graph-label' });
+  const labelX = point.x + radius + 6;
+  const text = svgEl('text', { x: labelX, y: point.y - Math.min(lines.length - 1, 1) * 7, class: 'graph-label' });
   lines.slice(0, 2).forEach((value, index) => {
-    const span = svgEl('tspan', { x: point.x + 15, dy: index ? 16 : 0 });
+    const span = svgEl('tspan', { x: labelX, dy: index ? 16 : 0 });
     span.textContent = index === 1 && lines.length > 2 ? short(value, 22) : value;
     text.append(span);
   });
@@ -396,10 +397,11 @@ function renderGraph(snapshot) {
   for (const node of nodes) {
     const point = points.get(node.id), group = svgEl('g', { class: 'graph-hit', tabindex: '0' });
     if (state.record && !neighbors.has(node.id)) group.classList.add('dimmed');
-    const circle = svgEl('circle', { cx: point.x, cy: point.y, r: Math.min(13, 3 + Math.sqrt(Math.max(0, node.degree || 0)) * 1.1) * state.nodeSize, class: `graph-node${node.id === state.record ? ' selected' : ''}` });
+    const radius = Math.min(13, 3 + Math.sqrt(Math.max(0, node.degree || 0)) * 1.1) * state.nodeSize * (node.kind === 'project' ? 2.2 : 1);
+    const circle = svgEl('circle', { cx: point.x, cy: point.y, r: radius, class: `graph-node${node.id === state.record ? ' selected' : ''}` });
     circle.style.setProperty('--node-color', state.colorMode === 'type' ? graphColors[node.kind] || '#aaa' : state.colorMode === 'project' ? palette.get(owners.get(node.id)) || '#aaa' : '#aaa');
     group.append(circle);
-    if (state.labels) graphLabel(group, node, point);
+    if (state.labels) graphLabel(group, node, point, radius);
     const tip = svgEl('title'); tip.textContent = node.title; group.append(tip);
     group.addEventListener('click', event => { event.stopPropagation(); selectRecord(node.id); });
     group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') selectRecord(node.id); });

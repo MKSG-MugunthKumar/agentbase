@@ -68,7 +68,7 @@ body[data-view="graph"] #refresh,body[data-view="tasks"] #refresh{display:none}
 .graph-hit.dimmed{opacity:.16}
 .graph-label{fill:#bababa;font-size:12px;pointer-events:none}
 .graph-hit{cursor:pointer}
-.graph-hit:hover .graph-node{fill:#d0d0d0}
+.graph-hit:hover .graph-node{filter:brightness(1.18)}
 .graph-empty{position:absolute;inset:0;display:grid;place-items:center;color:#8d8d8f;text-align:center;pointer-events:none}
 .board-workspace{height:100%;display:flex;flex-direction:column;padding-bottom:63px;background:#0c0e11}
 .board-filter-banner{margin:13px 18px 15px;padding:11px 13px;background:#152320;border-radius:8px;display:grid;gap:3px;color:#e0e8e5;font-size:12px}
