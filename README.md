@@ -4,7 +4,7 @@
 
 **Open-source project memory for coding agents.** Keep tasks, decisions, evidence, and handoffs in a local database that Codex and Claude Code can use through MCP. Explore and correct that context in the desktop app.
 
-[Download for Windows](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-windows-x64.zip) · [Download for macOS](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-macos-arm64.pkg) · [See all releases](https://github.com/SeanPreusse/agentbase/releases/latest)
+[Download for Windows](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.7-windows-x64.zip) · [Download for macOS](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.7-macos-arm64.pkg) · [See all releases](https://github.com/SeanPreusse/agentbase/releases/latest)
 
 ![AgentBase graph and task board](docs/screenshots/showcase.gif)
 
@@ -18,8 +18,8 @@
 
 | Desktop app | Download and open |
 | --- | --- |
-| Windows 10/11, x64 | Extract the [Windows ZIP](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-windows-x64.zip) and run `AgentBase.exe`. |
-| macOS 14+, Apple silicon | Open the [Mac installer](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-macos-arm64.pkg), or download the [app ZIP](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.6-macos-arm64.zip). |
+| Windows 10/11, x64 | Extract the [Windows ZIP](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.7-windows-x64.zip) and run `AgentBase.exe`. |
+| macOS 14+, Apple silicon | Open the [Mac installer](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.7-macos-arm64.pkg), or download the [app ZIP](https://github.com/SeanPreusse/agentbase/releases/latest/download/AgentBase-0.7.7-macos-arm64.zip). |
 
 The desktop bundles include Node.js and the AgentBase runtime. They are awaiting store signing and Apple notarization, so your operating system may ask you to approve opening them.
 
