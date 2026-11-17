@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { access, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { access, mkdtemp, readlink, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,9 +44,14 @@ export async function sandboxCommand(node: string, worker: string, dataPaths: st
     for (const path of bwrap) { try { await access(path); binary = path; break; } catch {} }
     if (!binary) throw new DomainError('SANDBOX_UNAVAILABLE', 'Data analysis requires bubblewrap on Linux. Install bubblewrap; analysis never falls back to unsandboxed execution.');
     const args = ['--unshare-all', '--die-with-parent', '--new-session', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp'];
+    // Homebrew's node loads ld.so and its libraries from the prefix it was built for (lib, Cellar, opt).
+    const homebrew = executable.match(/^(.+)\/Cellar\//)?.[1];
+    // That prefix is /home/linuxbrew/.linuxbrew; where /home is a symlink (Fedora Atomic: var/home), recreate it first.
+    if (homebrew) { try { args.push('--symlink', await readlink('/home'), '/home'); } catch {} }
     for (const path of ['/usr', '/lib', '/lib64', '/etc/ld.so.cache']) {
       try { await access(path); args.push('--ro-bind', path, path); } catch {}
     }
+    if (homebrew) for (const dir of ['Cellar', 'opt', 'lib']) args.push('--ro-bind-try', join(homebrew, dir), join(homebrew, dir));
     for (const path of new Set([runtime, await realpath(modules), fileURLToPath(new URL('../package.json', import.meta.url)), executable, ...dataPaths])) args.push('--ro-bind', path, path);
     args.push('--bind', scratch, scratch, '--', executable, '--max-old-space-size=192', worker);
     return { command: binary, args };
