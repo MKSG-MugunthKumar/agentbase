@@ -53,7 +53,8 @@ export async function sandboxCommand(node: string, worker: string, dataPaths: st
     }
     if (homebrew) for (const dir of ['Cellar', 'opt', 'lib']) args.push('--ro-bind-try', join(homebrew, dir), join(homebrew, dir));
     for (const path of new Set([runtime, await realpath(modules), fileURLToPath(new URL('../package.json', import.meta.url)), executable, ...dataPaths])) args.push('--ro-bind', path, path);
-    args.push('--bind', scratch, scratch, '--', executable, '--max-old-space-size=192', worker);
+    // Everything outside scratch is read-only, including the stand-in folders bwrap creates on its tmpfs mounts.
+    args.push('--bind', scratch, scratch, '--remount-ro', '/', '--remount-ro', '/tmp', '--', executable, '--max-old-space-size=192', worker);
     return { command: binary, args };
   }
   throw new DomainError('SANDBOX_UNAVAILABLE', 'Analysis currently supports macOS sandbox-exec and Linux bubblewrap. Core memory and task tools work without analysis.');
