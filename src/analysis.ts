@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { access, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { access, mkdtemp, readlink, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +20,9 @@ export async function sandboxCommand(node: string, worker: string, dataPaths: st
   if (process.platform === 'darwin') {
     const quoted = (s: string) => JSON.stringify(s);
     const reads = ['/System', '/usr/lib', '/usr/share', '/Library/Apple', '/private/var/db/dyld', runtime, await realpath(modules)];
+    // Homebrew's node links its runtime (libnode, libuv, openssl, icu, ...) from sibling kegs.
+    const homebrew = executable.match(/^(.+)\/Cellar\//)?.[1];
+    if (homebrew) reads.push(join(homebrew, 'Cellar'), join(homebrew, 'opt'));
     const profile = `(version 1)
       (deny default)
       (allow process-fork)
@@ -33,7 +36,7 @@ export async function sandboxCommand(node: string, worker: string, dataPaths: st
         ${[executable, fileURLToPath(new URL('../package.json', import.meta.url)), '/dev/null', '/dev/urandom', '/dev/random', ...dataPaths].map(p => `(literal ${quoted(p)})`).join(' ')})
       (allow file-write* (subpath ${quoted(scratch)}) (literal "/dev/null"))
       (allow file-read-data (subpath ${quoted(scratch)}))`;
-    return { command: '/usr/bin/sandbox-exec', args: ['-p', profile, executable, '--max-old-space-size=192', worker] };
+    return { command: '/usr/bin/sandbox-exec', args: ['-p', profile, executable, '--openssl-config=/dev/null', '--max-old-space-size=192', worker] };
   }
   if (process.platform === 'linux') {
     const bwrap = ['/usr/bin/bwrap', '/bin/bwrap'];
@@ -41,11 +44,17 @@ export async function sandboxCommand(node: string, worker: string, dataPaths: st
     for (const path of bwrap) { try { await access(path); binary = path; break; } catch {} }
     if (!binary) throw new DomainError('SANDBOX_UNAVAILABLE', 'Data analysis requires bubblewrap on Linux. Install bubblewrap; analysis never falls back to unsandboxed execution.');
     const args = ['--unshare-all', '--die-with-parent', '--new-session', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp'];
+    // Homebrew's node loads ld.so and its libraries from the prefix it was built for (lib, Cellar, opt).
+    const homebrew = executable.match(/^(.+)\/Cellar\//)?.[1];
+    // That prefix is /home/linuxbrew/.linuxbrew; where /home is a symlink (Fedora Atomic: var/home), recreate it first.
+    if (homebrew) { try { args.push('--symlink', await readlink('/home'), '/home'); } catch {} }
     for (const path of ['/usr', '/lib', '/lib64', '/etc/ld.so.cache']) {
       try { await access(path); args.push('--ro-bind', path, path); } catch {}
     }
+    if (homebrew) for (const dir of ['Cellar', 'opt', 'lib']) args.push('--ro-bind-try', join(homebrew, dir), join(homebrew, dir));
     for (const path of new Set([runtime, await realpath(modules), fileURLToPath(new URL('../package.json', import.meta.url)), executable, ...dataPaths])) args.push('--ro-bind', path, path);
-    args.push('--bind', scratch, scratch, '--', executable, '--max-old-space-size=192', worker);
+    // Everything outside scratch is read-only, including the stand-in folders bwrap creates on its tmpfs mounts.
+    args.push('--bind', scratch, scratch, '--remount-ro', '/', '--remount-ro', '/tmp', '--', executable, '--max-old-space-size=192', worker);
     return { command: binary, args };
   }
   throw new DomainError('SANDBOX_UNAVAILABLE', 'Analysis currently supports macOS sandbox-exec and Linux bubblewrap. Core memory and task tools work without analysis.');
